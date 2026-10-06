@@ -10,8 +10,8 @@
 # the desktop from stuttering every time a snapshot fires.
 set -uo pipefail
 
-REMOTE="${REMOTE:-crypt:home}"
-TRASH_REMOTE="${TRASH_REMOTE:-crypt:trash}"
+REMOTE="${REMOTE:-crypt1:home}"
+TRASH_REMOTE="${TRASH_REMOTE:-crypt1:trash}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 
 # rclone's config was written by the workflow step to the runner user's home.

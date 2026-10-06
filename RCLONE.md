@@ -4,11 +4,11 @@
 remotes:
 
 - **`backup:`** — your actual cloud storage (Google Drive, OneDrive, Dropbox, S3 …)
-- **`crypt:`** — an encrypted *view* of a folder inside `backup:`
+- **`crypt1:`** — an encrypted *view* of a folder inside `backup:`
 
-The workflows only ever touch the encrypted view: `crypt:home` (Linux profile),
-`crypt:winhome` (Windows profile) and `crypt:trash` (7-day recoverable
-deletions). Because `crypt:` sits in front, your cloud provider only ever stores
+The workflows only ever touch the encrypted view: `crypt1:home` (Linux profile),
+`crypt1:winhome` (Windows profile) and `crypt1:trash` (7-day recoverable
+deletions). Because `crypt1:` sits in front, your cloud provider only ever stores
 ciphertext — they never see your files in the clear.
 
 This secret is **optional**. Without it, every session starts with a blank
@@ -66,13 +66,13 @@ You're back at the menu. Type **`q`** to quit for now.
 
 ---
 
-## 2. Create the crypt remote (`crypt:`)
+## 2. Create the crypt remote (`crypt1:`)
 
 Run `rclone config` again.
 
 ```
 n) New remote
-name> crypt
+name> crypt1
 Storage> crypt          # "Encrypt/Decrypt a remote"
 remote> backup:cloud-desktop
 ```
@@ -93,7 +93,7 @@ password2 (salt)>       # press g to generate one
 > in your password manager before moving on.
 
 ```
-Keep this "crypt" remote?  y
+Keep this "crypt1" remote?  y
 q                        # quit
 ```
 
@@ -102,16 +102,16 @@ q                        # quit
 ## 3. Verify it works
 
 ```bash
-rclone lsd crypt:
+rclone lsd crypt1:
 ```
 
 No error (even if it lists nothing, because it's empty) means the pair is set up
 correctly. To prove write/read end-to-end:
 
 ```bash
-echo hello | rclone rcat crypt:test.txt
-rclone cat crypt:test.txt      # prints: hello
-rclone delete crypt:test.txt
+echo hello | rclone rcat crypt1:test.txt
+rclone cat crypt1:test.txt      # prints: hello
+rclone delete crypt1:test.txt
 ```
 
 ---
@@ -137,7 +137,7 @@ type = drive
 scope = drive
 token = {"access_token":"ya29....","token_type":"Bearer","refresh_token":"1//....","expiry":"2026-01-01T00:00:00.000000000Z"}
 
-[crypt]
+[crypt1]
 type = crypt
 remote = backup:cloud-desktop
 filename_encryption = standard
@@ -167,8 +167,8 @@ gh auth login
 
 ## Notes & gotchas
 
-- **The remote must be named `crypt`** and point at a `backup:`-prefixed path —
-  the workflows reference `crypt:home`, `crypt:winhome` and `crypt:trash`.
+- **The remote must be named `crypt1`** and point at a `backup:`-prefixed path —
+  the workflows reference `crypt1:home`, `crypt1:winhome` and `crypt1:trash`.
 - **Treat the file as highly sensitive.** It contains your OAuth refresh token
   *and* your crypt password/salt. It belongs in a secret, never in a file in the
   repo.

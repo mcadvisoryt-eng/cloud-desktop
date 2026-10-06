@@ -5,8 +5,8 @@ $ErrorActionPreference = 'Continue'
 
 try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch {}
 
-$remote = if ($env:REMOTE)       { $env:REMOTE }       else { 'crypt:winhome' }
-$trash  = if ($env:TRASH_REMOTE) { $env:TRASH_REMOTE } else { 'crypt:trash' }
+$remote = if ($env:REMOTE)       { $env:REMOTE }       else { 'crypt1:winhome' }
+$trash  = if ($env:TRASH_REMOTE) { $env:TRASH_REMOTE } else { 'crypt1:trash' }
 $stamp  = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
 $rclone = if (Test-Path 'C:\rclone\rclone.exe') { 'C:\rclone\rclone.exe' } else { 'rclone' }
 

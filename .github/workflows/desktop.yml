@@ -42,8 +42,8 @@ jobs:
     env:
       SESSION_MINUTES: '330'
       SNAPSHOT_EVERY_MIN: '30'
-      REMOTE: 'crypt:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
-      TRASH_REMOTE: 'crypt:trash'   # 7-day recoverable deletions
+      REMOTE: 'crypt1:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
+      TRASH_REMOTE: 'crypt1:trash'   # 7-day recoverable deletions
       TS_HOSTNAME: 'cloudpc'
       DEBIAN_FRONTEND: 'noninteractive'
     steps:
@@ -147,7 +147,7 @@ jobs:
           mkdir -p ~/.config/rclone
           printf '%s' "$RCLONE_CONFIG_SECRET" > ~/.config/rclone/rclone.conf
           chmod 600 ~/.config/rclone/rclone.conf
-          if command -v rclone >/dev/null && rclone listremotes 2>/dev/null | grep -q '^crypt:$'; then
+          if command -v rclone >/dev/null && rclone listremotes 2>/dev/null | grep -q '^crypt1:$'; then
             echo "Restoring /home/pc from $REMOTE ..."
             sudo RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf" rclone copy "$REMOTE/" /home/pc \
               --transfers 16 --checkers 16 --fast-list \
@@ -159,7 +159,7 @@ jobs:
               --exclude '**/shader-cache/**' \
               || echo "::warning::restore failed — continuing with empty home"
           else
-            echo "::warning::RCLONE_CONFIG missing or has no 'crypt' remote — starting with empty home"
+            echo "::warning::RCLONE_CONFIG missing or has no 'crypt1' remote — starting with empty home"
           fi
           sudo chown -R pc:pc /home/pc
 

@@ -38,8 +38,8 @@ jobs:
     env:
       SESSION_MINUTES: '330'
       SNAPSHOT_EVERY_MIN: '30'
-      REMOTE: 'crypt:winhome'        # encrypted remote for the Windows profile
-      TRASH_REMOTE: 'crypt:trash'
+      REMOTE: 'crypt1:winhome'        # encrypted remote for the Windows profile
+      TRASH_REMOTE: 'crypt1:trash'
       TS_HOSTNAME: 'cloudpc-win'
       RDP_USER: 'runneradmin'
     steps:
@@ -108,7 +108,7 @@ jobs:
           $env:RCLONE_CONFIG = "$env:APPDATA\rclone\rclone.conf"
 
           $remotes = & 'C:\rclone\rclone.exe' listremotes 2>$null
-          if ("$remotes" -match 'crypt:') {
+          if ("$remotes" -match 'crypt1:') {
             Write-Host "Restoring $env:USERPROFILE from $env:REMOTE ..."
             & 'C:\rclone\rclone.exe' copy "$env:REMOTE/" $env:USERPROFILE `
               --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line `
@@ -118,7 +118,7 @@ jobs:
               --exclude "AppData/Local/Microsoft/Windows/Explorer/**" `
               --exclude "AppData/Local/Packages/**/LocalCache/**"
           } else {
-            Write-Host "::warning::RCLONE_CONFIG missing or has no 'crypt' remote — starting with a blank profile"
+            Write-Host "::warning::RCLONE_CONFIG missing or has no 'crypt1' remote — starting with a blank profile"
           }
 
       - name: Bring up Tailscale

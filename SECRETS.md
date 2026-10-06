@@ -61,7 +61,7 @@ rclone config
 #     Storage: Google Drive (or Dropbox, OneDrive, S3 …)
 #     Follow the browser OAuth flow.
 #
-# n) new remote, name: crypt
+# n) new remote, name: crypt1
 #     Storage: Encrypt/Decrypt a remote
 #     remote to encrypt: backup:cloud-desktop
 #     filename encryption: standard

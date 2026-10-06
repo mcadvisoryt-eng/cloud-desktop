@@ -102,7 +102,7 @@ password = your `DESKTOP_PASSWORD`.
 - **No package install step.** The Windows image is prebuilt, so there's no
   ~5-minute apt phase to cache — boot is inherently quicker.
 - **Persistence** covers `C:\Users\runneradmin` (minus caches), synced to
-  `crypt:winhome`. The Linux one uses `crypt:home`.
+  `crypt1:winhome`. The Linux one uses `crypt1:home`.
 - **Latency tuning is registry-based** (`tune-rdp.ps1`) rather than xrdp.ini.
 - **Backups run at below-normal priority** — Windows has no `ionice`, so the
   snapshot process is dropped to `BelowNormal` and the child rclone inherits it.
