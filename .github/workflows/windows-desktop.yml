@@ -7,12 +7,15 @@ name: windows-desktop
 # No nested VM, no downloaded ISO, no activation step: windows-latest is
 # already a licensed, activated Windows Server image provided by GitHub.
 #
+# NOTE: RDP uses a DEDICATED user (`pc`), NOT `runneradmin`. Logging in as the
+# account the runner itself uses can disturb the runner session and kill the
+# job — so we leave runneradmin alone entirely.
+#
 # ---------------------------------------------------------------------------
 # LATENCY — read WINDOWS.md before expecting numbers.
-# RDP latency is dominated by the distance between you and the runner's Azure
-# region, and on a standard runner you cannot choose that region. Everything
-# here removes the latency that IS under our control (transport, crypto,
-# encoding, desktop effects). It cannot beat the speed of light.
+# RDP latency is dominated by the distance to the runner's Azure region, which
+# you cannot choose on a standard runner. Everything here removes the latency
+# that IS under our control (transport, crypto, encoding, desktop effects).
 # ---------------------------------------------------------------------------
 
 on:
@@ -41,7 +44,7 @@ jobs:
       REMOTE: 'crypt1:winhome'        # encrypted remote for the Windows profile
       TRASH_REMOTE: 'crypt1:trash'
       TS_HOSTNAME: 'cloudpc-win'
-      RDP_USER: 'runneradmin'
+      RDP_USER: 'pc'                  # dedicated RDP user (not runneradmin)
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +68,7 @@ jobs:
           }
           exit 0
 
-      - name: Enable RDP + set credentials
+      - name: Enable RDP + create the desktop user
         env:
           DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
         run: |
@@ -95,16 +98,32 @@ jobs:
             Write-Host "::warning::could not relax the password policy"
           }
 
+          # A DEDICATED user for RDP. We deliberately do NOT reuse runneradmin:
+          # logging in as the account the runner itself runs as can disturb the
+          # runner session. This account is separate, so your logon cannot.
+          $u = $env:RDP_USER
+          $pw = ConvertTo-SecureString -AsPlainText $env:DESKTOP_PASSWORD -Force
           try {
-            $pw = ConvertTo-SecureString -AsPlainText $env:DESKTOP_PASSWORD -Force
-            Set-LocalUser -Name $env:RDP_USER -Password $pw
+            if (Get-LocalUser -Name $u -ErrorAction SilentlyContinue) {
+              Set-LocalUser -Name $u -Password $pw
+            } else {
+              New-LocalUser -Name $u -Password $pw -PasswordNeverExpires -AccountNeverExpires | Out-Null
+            }
           } catch {
-            Write-Host "::error::Could not set the RDP password. Windows wants 8+ characters with upper case, lower case and a digit. Update the DESKTOP_PASSWORD secret and re-run."
+            Write-Host "::error::Could not create/set the RDP user. Windows wants 8+ characters with upper case, lower case and a digit. Update the DESKTOP_PASSWORD secret and re-run."
             exit 1
           }
-          Restart-Service -Name TermService -Force
+          Add-LocalGroupMember -Group 'Administrators' -Member $u -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $u -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "C:\Users\$u" | Out-Null
+
+          # Make sure the listener is up — but do NOT forcibly restart the
+          # service (that logs off sessions) unless nothing is listening.
+          if (-not (Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue)) {
+            Restart-Service -Name TermService -ErrorAction SilentlyContinue
+          }
           Start-Sleep -Seconds 3
-          Write-Host "RDP enabled for user $env:RDP_USER."
+          Write-Host "RDP enabled for user $u."
           exit 0
 
       - name: Tune RDP + desktop for lowest latency
@@ -129,11 +148,12 @@ jobs:
           Set-Content -Path "$env:APPDATA\rclone\rclone.conf" -Value $env:RCLONE_CONFIG_SECRET -NoNewline
           $env:RCLONE_CONFIG = "$env:APPDATA\rclone\rclone.conf"
 
+          $profileDir = "C:\Users\$env:RDP_USER"
           $remotes = & 'C:\rclone\rclone.exe' listremotes 2>$null
           $rc = 0
           if ("$remotes" -match 'crypt1:') {
-            Write-Host "Restoring $env:USERPROFILE from $env:REMOTE ..."
-            & 'C:\rclone\rclone.exe' copy "$env:REMOTE/" $env:USERPROFILE `
+            Write-Host "Restoring $profileDir from $env:REMOTE ..."
+            & 'C:\rclone\rclone.exe' copy "$env:REMOTE/" $profileDir `
               --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line `
               --exclude "AppData/Local/Temp/**" `
               --exclude "AppData/Local/Microsoft/Windows/INetCache/**" `

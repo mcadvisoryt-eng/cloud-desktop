@@ -17,7 +17,8 @@ if (-not (Test-Path $conf)) {
 }
 $env:RCLONE_CONFIG = $conf
 
-$src = $env:USERPROFILE
+$u = if ($env:RDP_USER) { $env:RDP_USER } else { 'runneradmin' }
+$src = "C:\Users\$u"
 Write-Host "Snapshotting $src -> $remote (trash: $trash/$stamp)"
 
 & $rclone sync $src $remote --backup-dir "$trash/$stamp" `

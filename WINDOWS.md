@@ -92,7 +92,7 @@ In your RDP client, favour speed over quality — you said quality doesn't matte
   on your tailnet: `tailscale ping cloudpc-win`. A `via DERP` result adds a big
   hop — a direct path (`via <ip>:41641`) is what you want.
 
-Connect to `cloudpc-win.<your-tailnet>.ts.net:3389`, user `runneradmin`,
+Connect to `cloudpc-win.<your-tailnet>.ts.net:3389`, user `pc`,
 password = your `DESKTOP_PASSWORD`.
 
 ---
@@ -101,7 +101,7 @@ password = your `DESKTOP_PASSWORD`.
 
 - **No package install step.** The Windows image is prebuilt, so there's no
   ~5-minute apt phase to cache — boot is inherently quicker.
-- **Persistence** covers `C:\Users\runneradmin` (minus caches), synced to
+- **Persistence** covers `C:\Users\pc` (minus caches), synced to
   `crypt1:winhome`. The Linux one uses `crypt1:home`.
 - **Latency tuning is registry-based** (`tune-rdp.ps1`) rather than xrdp.ini.
 - **Backups run at below-normal priority** — Windows has no `ionice`, so the
@@ -113,5 +113,5 @@ password = your `DESKTOP_PASSWORD`.
   some that insist on a client SKU may not.
 - No GPU — everything is software-rendered.
 - Same 6-hour hard cap and same off-label-use status as the Linux workflow.
-- Changing `runneradmin`'s password is fine, but if you RDP in *while* a job is
-  running you share the machine with the Actions job; cancel the job when done.
+- RDP uses a dedicated `pc` account, kept separate from the account the runner
+  itself uses — logging in that way can't disturb the running job.

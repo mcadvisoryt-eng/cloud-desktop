@@ -19,7 +19,7 @@ they go.
 | Workflow | `cloud-desktop` | `windows-desktop` |
 | Host (MagicDNS) | `cloudpc.<your-tailnet>.ts.net` | `cloudpc-win.<your-tailnet>.ts.net` |
 | Port | 3389 | 3389 |
-| Username | `pc` | `runneradmin` |
+| Username | `pc` | `pc` |
 | Password | `DESKTOP_PASSWORD` | `DESKTOP_PASSWORD` |
 | Protocol | RDP (xrdp) | RDP |
 

@@ -31,7 +31,7 @@ the only way you can reach the desktop.
 
 The RDP login password. Choose it yourself — it's not fetched from anywhere.
 
-- Username is `pc` (Linux) or `runneradmin` (Windows).
+- Username is `pc` (both the Linux and the Windows desktop).
 - Windows enforces complexity: **8+ characters with upper case, lower case and
   a digit**. Example shape: `Blu3-Door!7`.
 
