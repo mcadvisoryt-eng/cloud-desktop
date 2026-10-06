@@ -38,8 +38,19 @@ if ! id "$DESKTOP_USER" >/dev/null 2>&1; then
 fi
 echo "${DESKTOP_USER}:${DESKTOP_PASSWORD}" | chpasswd
 usermod -aG ssl-cert "$DESKTOP_USER" 2>/dev/null || true
-sudo -u "$DESKTOP_USER" bash -c \
-  'mkdir -p ~/.config; printf "%s\n" "xset s off -dpms" "exec startxfce4" > ~/.xsession; chmod +x ~/.xsession'
+mkdir -p "/home/$DESKTOP_USER/.config"
+# xrdp runs ~/.xsession on login. It MUST be launched through dbus-launch, or
+# xfce4-session aborts with "Unable to determine failsafe session name".
+cat > "/home/$DESKTOP_USER/.xsession" <<'XSEOF'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+export XDG_CONFIG_DIRS=/etc/xdg
+xset s off -dpms 2>/dev/null || true
+exec dbus-launch --exit-with-session startxfce4
+XSEOF
+chmod +x "/home/$DESKTOP_USER/.xsession"
+chown "$DESKTOP_USER:$DESKTOP_USER" "/home/$DESKTOP_USER/.xsession"
 
 # --- latency tuning (identical to the Actions workflow) --------------------
 if [ -f "$SCRIPT_DIR/tune-xrdp.py" ]; then

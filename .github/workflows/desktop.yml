@@ -91,11 +91,22 @@ jobs:
           echo "pc:${DESKTOP_PASSWORD}" | sudo chpasswd
           sudo usermod -aG ssl-cert pc       # xrdp needs ssl-cert on Debian/Ubuntu
           sudo mkdir -p /run/xrdp /var/run/xrdp
-          sudo mkdir -p /home/pc
-          sudo chown pc:pc /home/pc
-          # Tell xrdp to launch XFCE on login, and kill screen blanking/DPMS so
-          # the session never goes to sleep behind your back.
-          sudo -u pc bash -c 'mkdir -p ~/.config; printf "%s\n" "xset s off -dpms" "exec startxfce4" > ~/.xsession; chmod +x ~/.xsession'
+          sudo mkdir -p /home/pc/.config
+          sudo chown -R pc:pc /home/pc
+          # xrdp runs ~/.xsession on login. It MUST be launched through
+          # dbus-launch, or xfce4-session aborts with
+          # "Unable to determine failsafe session name". (dbus-launch comes
+          # from the dbus-x11 package installed below.)
+          sudo tee /home/pc/.xsession >/dev/null <<'XSEOF'
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          export XDG_CONFIG_DIRS=/etc/xdg
+          xset s off -dpms 2>/dev/null || true
+          exec dbus-launch --exit-with-session startxfce4
+          XSEOF
+          sudo chmod +x /home/pc/.xsession
+          sudo chown pc:pc /home/pc/.xsession
 
       - name: Install desktop + restore home (in parallel)
         env:
