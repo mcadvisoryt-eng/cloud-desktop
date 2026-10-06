@@ -1,0 +1,167 @@
+name: windows-desktop
+
+# A licensed Windows desktop on a GitHub-hosted Windows runner.
+# Reached over RDP through Tailscale, with the user profile backed up to the
+# same encrypted rclone remote as the Linux variant.
+#
+# No nested VM, no downloaded ISO, no activation step: windows-latest is
+# already a licensed, activated Windows Server image provided by GitHub.
+#
+# ---------------------------------------------------------------------------
+# LATENCY — read WINDOWS.md before expecting numbers.
+# RDP latency is dominated by the distance between you and the runner's Azure
+# region, and on a standard runner you cannot choose that region. Everything
+# here removes the latency that IS under our control (transport, crypto,
+# encoding, desktop effects). It cannot beat the speed of light.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 IST (22:30 UTC) daily safety-net.
+    - cron: '30 22 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-desktop
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 345   # under GitHub's 6h (360m) hard cap
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SESSION_MINUTES: '330'
+      SNAPSHOT_EVERY_MIN: '30'
+      REMOTE: 'crypt:winhome'        # encrypted remote for the Windows profile
+      TRASH_REMOTE: 'crypt:trash'
+      TS_HOSTNAME: 'cloudpc-win'
+      RDP_USER: 'runneradmin'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — cancel this run if another session is already active
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Host "::warning::RESTART_PAT secret not set — cannot check for duplicates"
+            exit 0
+          }
+          $running = 0
+          $out = gh run list --workflow=windows-desktop.yml --status in_progress --json databaseId --jq 'length' 2>$null
+          if ($out) { $running = [int]$out }
+          Write-Host "In-progress runs (incl. self): $running"
+          if ($running -gt 1) {
+            Write-Host "Another session is already active. Cancelling this duplicate."
+            gh run cancel $env:GITHUB_RUN_ID --repo $env:GH_REPO 2>$null
+            Start-Sleep -Seconds 15
+          }
+
+      - name: Enable RDP + set credentials
+        env:
+          DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
+        run: |
+          if (-not $env:DESKTOP_PASSWORD) {
+            Write-Host "::error::DESKTOP_PASSWORD secret not set"
+            exit 1
+          }
+          # Turn on Remote Desktop and open the firewall rule (the tailnet is
+          # the only network that can reach it anyway).
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1 -Force
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+          # Give the runner admin account a password you know.
+          # NOTE: Windows enforces password complexity — use 8+ chars with
+          # upper, lower and a digit.
+          $pw = ConvertTo-SecureString -AsPlainText $env:DESKTOP_PASSWORD -Force
+          Set-LocalUser -Name $env:RDP_USER -Password $pw
+          Restart-Service -Name TermService -Force
+          Start-Sleep -Seconds 3
+          Write-Host "RDP enabled for user $env:RDP_USER."
+
+      - name: Tune RDP + desktop for lowest latency
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/tune-rdp.ps1"
+
+      - name: Install rclone + restore profile from encrypted backup
+        env:
+          RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          # Static rclone binary (no package manager round-trip).
+          Invoke-WebRequest -Uri 'https://downloads.rclone.org/rclone-current-windows-amd64.zip' -OutFile "$env:TEMP\rclone.zip"
+          Expand-Archive "$env:TEMP\rclone.zip" -DestinationPath "$env:TEMP\rclone" -Force
+          $exe = Get-ChildItem "$env:TEMP\rclone" -Recurse -Filter rclone.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path 'C:\rclone' | Out-Null
+          Copy-Item $exe.FullName 'C:\rclone\rclone.exe' -Force
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\rclone'
+          & 'C:\rclone\rclone.exe' version | Select-Object -First 1
+
+          New-Item -ItemType Directory -Force -Path "$env:APPDATA\rclone" | Out-Null
+          Set-Content -Path "$env:APPDATA\rclone\rclone.conf" -Value $env:RCLONE_CONFIG_SECRET -NoNewline
+          $env:RCLONE_CONFIG = "$env:APPDATA\rclone\rclone.conf"
+
+          $remotes = & 'C:\rclone\rclone.exe' listremotes 2>$null
+          if ("$remotes" -match 'crypt:') {
+            Write-Host "Restoring $env:USERPROFILE from $env:REMOTE ..."
+            & 'C:\rclone\rclone.exe' copy "$env:REMOTE/" $env:USERPROFILE `
+              --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line `
+              --exclude "AppData/Local/Temp/**" `
+              --exclude "AppData/Local/Microsoft/Windows/INetCache/**" `
+              --exclude "AppData/Local/Microsoft/Windows/WebCache/**" `
+              --exclude "AppData/Local/Microsoft/Windows/Explorer/**" `
+              --exclude "AppData/Local/Packages/**/LocalCache/**"
+          } else {
+            Write-Host "::warning::RCLONE_CONFIG missing or has no 'crypt' remote — starting with a blank profile"
+          }
+
+      - name: Bring up Tailscale
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          if (-not $env:TS_AUTHKEY) {
+            Write-Host "::warning::TS_AUTHKEY not set — desktop unreachable via tailnet"
+            exit 0
+          }
+          $msi = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi
+          Start-Process msiexec.exe -ArgumentList '/i', $msi, '/qn', '/norestart' -Wait
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $ts up "--authkey=$env:TS_AUTHKEY" "--hostname=$env:TS_HOSTNAME" --accept-routes
+          $ip = (& $ts ip -4 | Select-Object -First 1)
+          Write-Host "::notice::Windows desktop ready at $ip — RDP to $env:TS_HOSTNAME.<your-tailnet>.ts.net:3389 (user $env:RDP_USER)"
+
+      - name: Run session
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-session.ps1"
+
+      - name: Final backup
+        if: always()   # even on failure or cancellation
+        continue-on-error: true
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-snapshot.ps1"
+
+      - name: Trigger next session (fallback if the session did not pre-queue one)
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+        run: |
+          if (-not $env:GH_TOKEN) { Write-Host "No RESTART_PAT — chain stops here."; exit 0 }
+          $queued = 0
+          $out = gh run list --workflow=windows-desktop.yml --status queued --json databaseId --jq 'length' 2>$null
+          if ($out) { $queued = [int]$out }
+          if ($queued -gt 0) {
+            Write-Host "A run is already queued — not adding another."
+            exit 0
+          }
+          gh workflow run windows-desktop.yml --repo $env:GITHUB_REPOSITORY
+          Write-Host "Next session queued."

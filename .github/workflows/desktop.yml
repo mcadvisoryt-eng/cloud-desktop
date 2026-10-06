@@ -1,0 +1,265 @@
+name: cloud-desktop
+
+# An ephemeral Linux desktop that lives on GitHub Actions runners.
+# Each session restores your home directory from an encrypted rclone
+# remote on boot, runs for ~5.5h, snapshots periodically, does a final
+# sync, then triggers the next session with your PAT so the chain never breaks.
+#
+# ---------------------------------------------------------------------------
+# LATENCY / RESPONSIVENESS TUNING  (see TUNING.md for the rationale)
+#   * APT .deb archives are cached between runners, so the ~4-6 min package
+#     install collapses to seconds on a cache hit.
+#   * The home restore runs IN PARALLEL with the package install, and rclone
+#     is fetched as a static binary instead of through apt.
+#   * xrdp is tuned for the lowest interactive latency: fastpath I/O,
+#     TCP_NODELAY, bitmap cache + compression, RemoteFX preferred over H.264,
+#     and short Xorg frame-capture intervals.
+#   * XFCE compositing, animations and screen blanking are switched off.
+#   * Backups run at idle CPU/IO priority so they never make the desktop stutter.
+#   * The next runner is queued ~10 min before this one ends, so the handoff
+#     gap loses its queue wait.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 IST (22:30 UTC) daily safety-net. If the PAT chain ever breaks,
+    # this re-starts it.
+    - cron: '30 22 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-desktop
+  # Never kill a live session because of an overlapping trigger.
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345   # comfortably under GitHub's 6h (360m) hard cap
+    env:
+      SESSION_MINUTES: '330'
+      SNAPSHOT_EVERY_MIN: '30'
+      REMOTE: 'crypt:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
+      TRASH_REMOTE: 'crypt:trash'   # 7-day recoverable deletions
+      TS_HOSTNAME: 'cloudpc'
+      DEBIAN_FRONTEND: 'noninteractive'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — cancel this run if another session is already active
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::RESTART_PAT secret not set — cannot check for duplicates"
+            exit 0
+          fi
+          # gh run list includes this very run as in_progress.
+          running=$(gh run list --workflow=desktop.yml --status in_progress --json databaseId --jq 'length' || echo 0)
+          echo "In-progress runs (incl. self): $running"
+          if [ "$running" -gt 1 ]; then
+            echo "Another session is already active. Cancelling this duplicate."
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GH_REPO" || true
+            sleep 15   # give GitHub time to process the cancellation
+          fi
+
+      # Reuse the downloaded .deb files from the previous runner. This is the
+      # single biggest boot-time win: libreoffice + fonts + xfce4 are large.
+      - name: Cache APT package archives
+        uses: actions/cache@v4
+        with:
+          path: apt-archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/desktop.yml') }}
+          restore-keys: |
+            apt-${{ runner.os }}-
+
+      - name: Create desktop user + session
+        env:
+          DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DESKTOP_PASSWORD" ]; then
+            echo "::error::DESKTOP_PASSWORD secret not set"
+            exit 1
+          fi
+          sudo useradd -m -s /bin/bash pc || true
+          echo "pc:${DESKTOP_PASSWORD}" | sudo chpasswd
+          sudo usermod -aG ssl-cert pc       # xrdp needs ssl-cert on Debian/Ubuntu
+          sudo mkdir -p /run/xrdp /var/run/xrdp
+          sudo mkdir -p /home/pc
+          sudo chown pc:pc /home/pc
+          # Tell xrdp to launch XFCE on login, and kill screen blanking/DPMS so
+          # the session never goes to sleep behind your back.
+          sudo -u pc bash -c 'mkdir -p ~/.config; printf "%s\n" "xset s off -dpms" "exec startxfce4" > ~/.xsession; chmod +x ~/.xsession'
+
+      - name: Install desktop + restore home (in parallel)
+        env:
+          RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          set -uo pipefail
+
+          # --- 1. Package install runs in the background -------------------
+          (
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            mkdir -p apt-archives
+            # Seed the apt cache from the restored cache dir, if any.
+            sudo cp -a apt-archives/. /var/cache/apt/archives/ 2>/dev/null || true
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              xfce4 xfce4-terminal thunar xclip xdg-utils \
+              xrdp dbus-x11 xorgxrdp \
+              libreoffice libreoffice-gtk3 \
+              fonts-noto-cjk fonts-noto-color-emoji \
+              policykit-1-gnome \
+              rclone
+            # Firefox via Mozilla's apt repo (avoid the snap stub on ubuntu-24.04).
+            # (wget to a file first — piping to tee would mask a failed download.)
+            sudo install -d -m 0755 /etc/apt/keyrings
+            wget -qO /tmp/mozilla-key.gpg https://packages.mozilla.org/apt/repo-signing-key.gpg
+            sudo cp /tmp/mozilla-key.gpg /etc/apt/keyrings/packages.mozilla.org.asc
+            echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+              | sudo tee /etc/apt/sources.list.d/mozilla.list >/dev/null
+            printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
+              | sudo tee /etc/apt/preferences.d/mozilla >/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y firefox
+            # Persist the freshly downloaded .debs for the next runner.
+            cp -a /var/cache/apt/archives/*.deb apt-archives/ 2>/dev/null || true
+          ) &
+          APT_PID=$!
+
+          # --- 2. Meanwhile, fetch rclone + restore /home/pc ----------------
+          # Static binary: no apt round-trip, available immediately.
+          if curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip \
+             && python3 -c "import zipfile; zipfile.ZipFile('/tmp/rclone.zip').extractall('/tmp/rclone')" \
+             && sudo install -m 0755 /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone; then
+            rclone version | head -1
+          else
+            echo "::warning::could not fetch static rclone — falling back to the apt package"
+          fi
+
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONFIG_SECRET" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          if command -v rclone >/dev/null && rclone listremotes 2>/dev/null | grep -q '^crypt:$'; then
+            echo "Restoring /home/pc from $REMOTE ..."
+            sudo RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf" rclone copy "$REMOTE/" /home/pc \
+              --transfers 16 --checkers 16 --fast-list \
+              --stats 30s --stats-one-line \
+              --exclude '.cache/**' \
+              --exclude 'Cache/**' \
+              --exclude '**/cache2/**' \
+              --exclude '**/startupCache/**' \
+              --exclude '**/shader-cache/**' \
+              || echo "::warning::restore failed — continuing with empty home"
+          else
+            echo "::warning::RCLONE_CONFIG missing or has no 'crypt' remote — starting with empty home"
+          fi
+          sudo chown -R pc:pc /home/pc
+
+          # --- 3. Wait for the package install to finish -------------------
+          wait "$APT_PID"
+
+      - name: Bring up Tailscale
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TS_AUTHKEY" ]; then
+            echo "::warning::TS_AUTHKEY not set — desktop unreachable via tailnet"
+            exit 0
+          fi
+          curl -fsSL https://tailscale.com/install.sh | sh
+          # NOTE: 'ephemeral' is a property of the AUTH KEY (set when generating
+          # it in the Tailscale admin console), NOT a CLI flag on `tailscale up`.
+          sudo tailscale up --authkey="$TS_AUTHKEY" \
+            --hostname="$TS_HOSTNAME" \
+            --accept-routes
+          TS_IP=$(tailscale ip -4 | head -1 || echo 'unknown')
+          echo "::notice::Desktop ready at ${TS_IP} — RDP to ${TS_HOSTNAME}.<your-tailnet>.ts.net:3389 (MagicDNS)"
+
+      - name: Tune xrdp + XFCE for lowest latency
+        run: |
+          set -euo pipefail
+
+          # ---- 1. Prefer RemoteFX over H.264 --------------------------------
+          # On a GPU-less runner RFX is noticeably snappier / lower-latency
+          # for UI work than H.264. gfx.toml only exists on xrdp >= 0.10.
+          if [ -f /etc/xrdp/gfx.toml ]; then
+            sudo cp /etc/xrdp/gfx.toml /etc/xrdp/gfx.toml.orig
+            if sudo grep -qE '^[[:space:]]*order[[:space:]]*=' /etc/xrdp/gfx.toml; then
+              sudo sed -i -E 's|^[[:space:]]*order[[:space:]]*=.*|order = ["RFX", "H.264"]|' /etc/xrdp/gfx.toml
+            else
+              sudo sed -i '/^\[codec\]/a order = ["RFX", "H.264"]' /etc/xrdp/gfx.toml
+            fi
+            echo "gfx.toml: codec order set to RFX first"
+          fi
+
+          # ---- 2. xrdp.ini: latency-first globals + short frame intervals
+          # (see scripts/tune-xrdp.py — line-based, section-confined, idempotent)
+          sudo cp /etc/xrdp/xrdp.ini /etc/xrdp/xrdp.ini.orig
+          sudo python3 "$GITHUB_WORKSPACE/scripts/tune-xrdp.py" /etc/xrdp/xrdp.ini
+
+          # ---- 3. XFCE: no compositor, no animation, no blanking -----------
+          sudo -u pc mkdir -p /home/pc/.config/xfce4/xfconf/xfce-perchannel-xml
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<channel name="xfwm4" version="1.0">' \
+            '  <property name="general" type="empty">' \
+            '    <property name="use_compositing" type="bool" value="false"/>' \
+            '    <property name="box_move" type="bool" value="false"/>' \
+            '    <property name="box_resize" type="bool" value="false"/>' \
+            '    <property name="cycle_preview" type="bool" value="false"/>' \
+            '  </property>' \
+            '</channel>' \
+            | sudo -u pc tee /home/pc/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml >/dev/null
+          echo "xrdp + XFCE tuned for lowest latency."
+
+      - name: Start xrdp + run session
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sudo systemctl enable --now xrdp 2>/dev/null || sudo service xrdp restart
+          # Readiness check: verify xrdp is actually listening before proceeding.
+          for i in $(seq 1 15); do
+            if (ss -ltn 2>/dev/null | grep -q ':3389 '); then
+              echo "xrdp is listening on :3389 (after ${i}s)"
+              break
+            fi
+            sleep 1
+          done
+          if ! (ss -ltn 2>/dev/null | grep -q ':3389 '); then
+            echo "::error::xrdp failed to start listening on :3389"
+            sudo service xrdp status || true
+            exit 1
+          fi
+          bash "$GITHUB_WORKSPACE/scripts/run-session.sh"
+
+      - name: Final backup
+        if: always()   # even on failure or cancellation — save what we can
+        run: bash "$GITHUB_WORKSPACE/scripts/snapshot.sh" || true
+
+      - name: Trigger next session (fallback if the session did not pre-queue one)
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ secrets.RESTART_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then echo "No RESTART_PAT — chain stops here."; exit 0; fi
+          # Don't add another run if one is already queued (the session step
+          # pre-queues ~10 min before the end; the daily safety-net also queues).
+          queued=$(gh run list --workflow=desktop.yml --status queued --json databaseId --jq 'length' || echo 0)
+          if [ "$queued" -gt 0 ]; then
+            echo "A run is already queued — not adding another."
+            exit 0
+          fi
+          gh workflow run desktop.yml --repo "$GITHUB_REPOSITORY"
+          echo "Next session queued."
