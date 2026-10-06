@@ -20,9 +20,10 @@ and why it's free. (Source: redroid-doc, github.com/remote-android/redroid-doc.)
 
 **Google Play** is added by baking GApps into the redroid image with
 `ayasa520/redroid-script`, which patches the image without recompiling it. It
-uses **MindTheGapps**, because OpenGApps only supports Android 11. The same
-script adds **houdini** (so ARM apps run on the x86_64 host) and can add
-**Widevine** (DRM playback).
+uses **LiteGapps**, which ships real x86_64 builds — MindTheGapps is built for
+arm64, and its Google apps crash on this x86_64 host. The same script adds
+**houdini** (so ARM apps run on the x86_64 host) and can add **Widevine**
+(DRM playback).
 
 ---
 
@@ -148,7 +149,7 @@ real low latency, run redroid on the Indian-region VM (`CLOUD-VM.md`).
 | Screen size | `androidboot.redroid_width/height/dpi` in the "Start Android" step (default 540×960 @ 240, lowered for latency) |
 | Frame rate | `androidboot.redroid_fps` (default 30) |
 | Android version | `ANDROID_VERSION` (default `13.0.0`) |
-| Google Play package | `-mtg` in the redroid-script line (`-lg` LiteGapps, `-g` OpenGApps = 11 only) |
+| Google Play package | `-lg` (LiteGapps, x86_64). `-mtg` MindTheGapps is arm64 and crashes here; `-g` OpenGApps is Android 11 only |
 | ARM app translation | `-i` (houdini) — remove if it causes trouble |
 | Widevine DRM | `-w` |
 | Root (Magisk) | on by default (`-m`); remove it for better app compatibility |
@@ -180,5 +181,10 @@ Android won't boot — check that first.
   "Serve Android + run session" step.
 - **Play Store says "device not certified"** → the run log prints the Android
   ID; submit it at <https://www.google.com/android/uncertified/>.
+- **Play Store crashes / bounces you to the home screen** → almost always an
+  architecture mismatch: arm64 Google apps on an x86_64 host. The workflow now
+  uses LiteGapps (x86_64). If it still crashes, check the
+  "Diagnostics — GApps state" step: `ro.product.cpu.abilist` should start with
+  `x86_64`, and the crash log will name the failing package.
 - **An app says "your device isn't compatible"** → it needs hardware
   attestation, which can't be provided (see Integrity above).
