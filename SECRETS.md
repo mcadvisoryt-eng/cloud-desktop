@@ -52,7 +52,8 @@ desktop stops after 6 h and you restart it manually.
 Encrypted backup of your home directory, so the desktop persists across
 sessions. Without it every session starts with a blank profile.
 
-Do this once on your own computer (install rclone from <https://rclone.org>):
+**Full step-by-step walkthrough: see `RCLONE.md`.** The short version, done once
+on your own computer (install rclone from <https://rclone.org>):
 
 ```bash
 rclone config
