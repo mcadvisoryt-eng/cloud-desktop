@@ -120,10 +120,34 @@ your safety net.
 
 ## Tuning
 
+### Making it less laggy (do this first)
+
+ws-scrcpy streams through your browser, and **the decoder you pick matters more
+than anything else**. In the device row:
+
+1. **Pick `H264 Converter`** (Media Source Extensions). It uses your phone's
+   hardware H.264 decoder. `Broadway.js` and `Tiny H264` are *software* WASM
+   decoders — they are the single biggest cause of lag. Switching to MSE is the
+   one change that matters most.
+2. Keep the dropdown on **`proxy over adb`** (correct for redroid).
+3. Use **`Configure stream`** to lower `max size` (e.g. 540) and set a modest
+   bitrate — less to encode, less to send, less lag.
+
+### Honest floor
+
+Even fully tuned, this is not as snappy as the Windows/RDP desktop: RDP is a
+mature, heavily optimised protocol, while ws-scrcpy is a device → scrcpy-server
+→ adb → Node proxy → WebSocket → browser pipeline. And the runner is in a US
+Azure region, so ~180–250 ms of network round-trip is unavoidable here. For
+real low latency, run redroid on the Indian-region VM (`CLOUD-VM.md`).
+
+### Other knobs
+
 | What | Where |
 |---|---|
+| Screen size | `androidboot.redroid_width/height/dpi` in the "Start Android" step (default 540×960 @ 240, lowered for latency) |
+| Frame rate | `androidboot.redroid_fps` (default 30) |
 | Android version | `ANDROID_VERSION` (default `13.0.0`) |
-| Screen | `androidboot.redroid_width/height/dpi` in the "Start Android" step |
 | Google Play package | `-mtg` in the redroid-script line (`-lg` LiteGapps, `-g` OpenGApps = 11 only) |
 | ARM app translation | `-i` (houdini) — remove if it causes trouble |
 | Widevine DRM | `-w` |
