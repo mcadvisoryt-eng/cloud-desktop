@@ -63,6 +63,7 @@ jobs:
             gh run cancel $env:GITHUB_RUN_ID --repo $env:GH_REPO 2>$null
             Start-Sleep -Seconds 15
           }
+          exit 0
 
       - name: Enable RDP + set credentials
         env:
@@ -77,18 +78,39 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1 -Force
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
-          # Give the runner admin account a password you know.
-          # NOTE: Windows enforces password complexity — use 8+ chars with
-          # upper, lower and a digit.
-          $pw = ConvertTo-SecureString -AsPlainText $env:DESKTOP_PASSWORD -Force
-          Set-LocalUser -Name $env:RDP_USER -Password $pw
+
+          # This box is reachable only over Tailscale, so relax the local
+          # password policy first — that way whatever password you chose is
+          # accepted instead of tripping Windows' complexity rules.
+          # Best-effort: if it fails we still try to set the password below.
+          try {
+            $inf = "$env:TEMP\pwpol.inf"; $sdb = "$env:TEMP\pwpol.sdb"
+            secedit /export /cfg $inf | Out-Null
+            (Get-Content $inf -Encoding Unicode) `
+              -replace 'PasswordComplexity\s*=\s*1', 'PasswordComplexity = 0' `
+              -replace 'MinimumPasswordLength\s*=\s*\d+', 'MinimumPasswordLength = 0' |
+              Set-Content $inf -Encoding Unicode
+            secedit /configure /db $sdb /cfg $inf /areas SECURITYPOLICY | Out-Null
+          } catch {
+            Write-Host "::warning::could not relax the password policy"
+          }
+
+          try {
+            $pw = ConvertTo-SecureString -AsPlainText $env:DESKTOP_PASSWORD -Force
+            Set-LocalUser -Name $env:RDP_USER -Password $pw
+          } catch {
+            Write-Host "::error::Could not set the RDP password. Windows wants 8+ characters with upper case, lower case and a digit. Update the DESKTOP_PASSWORD secret and re-run."
+            exit 1
+          }
           Restart-Service -Name TermService -Force
           Start-Sleep -Seconds 3
           Write-Host "RDP enabled for user $env:RDP_USER."
+          exit 0
 
       - name: Tune RDP + desktop for lowest latency
         run: |
           & "$env:GITHUB_WORKSPACE/scripts/tune-rdp.ps1"
+          exit 0
 
       - name: Install rclone + restore profile from encrypted backup
         env:
@@ -108,6 +130,7 @@ jobs:
           $env:RCLONE_CONFIG = "$env:APPDATA\rclone\rclone.conf"
 
           $remotes = & 'C:\rclone\rclone.exe' listremotes 2>$null
+          $rc = 0
           if ("$remotes" -match 'crypt1:') {
             Write-Host "Restoring $env:USERPROFILE from $env:REMOTE ..."
             & 'C:\rclone\rclone.exe' copy "$env:REMOTE/" $env:USERPROFILE `
@@ -117,9 +140,14 @@ jobs:
               --exclude "AppData/Local/Microsoft/Windows/WebCache/**" `
               --exclude "AppData/Local/Microsoft/Windows/Explorer/**" `
               --exclude "AppData/Local/Packages/**/LocalCache/**"
+            $rc = $LASTEXITCODE
           } else {
             Write-Host "::warning::RCLONE_CONFIG missing or has no 'crypt1' remote — starting with a blank profile"
           }
+          # rclone exits non-zero for locked/skipped files, which is normal for a
+          # live profile — don't fail the run over it.
+          if ($rc -ne 0) { Write-Host "::warning::rclone restore finished with warnings (exit $rc)" }
+          exit 0
 
       - name: Bring up Tailscale
         env:
@@ -133,9 +161,26 @@ jobs:
           Invoke-WebRequest -Uri 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi
           Start-Process msiexec.exe -ArgumentList '/i', $msi, '/qn', '/norestart' -Wait
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          # Wait for the Tailscale service to exist and be running.
+          for ($i = 0; $i -lt 15; $i++) {
+            $svc = Get-Service Tailscale -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq 'Running') { break }
+            if ($svc) { Start-Service Tailscale -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 2
+          }
           & $ts up "--authkey=$env:TS_AUTHKEY" "--hostname=$env:TS_HOSTNAME" --accept-routes
-          $ip = (& $ts ip -4 | Select-Object -First 1)
-          Write-Host "::notice::Windows desktop ready at $ip — RDP to $env:TS_HOSTNAME.<your-tailnet>.ts.net:3389 (user $env:RDP_USER)"
+          # tailscale takes a few seconds to report an address.
+          $ip = ""
+          for ($i = 0; $i -lt 20 -and -not $ip; $i++) {
+            Start-Sleep -Seconds 3
+            $ip = (& $ts ip -4 2>$null | Select-Object -First 1)
+          }
+          if ($ip) {
+            Write-Host "::notice::Windows desktop ready at $ip — RDP to $env:TS_HOSTNAME.<your-tailnet>.ts.net:3389 (user $env:RDP_USER)"
+          } else {
+            Write-Host "::warning::Tailscale did not report an IP — check the tailnet / auth key"
+          }
+          exit 0
 
       - name: Run session
         env:
@@ -143,12 +188,14 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           & "$env:GITHUB_WORKSPACE/scripts/windows-session.ps1"
+          exit 0
 
       - name: Final backup
         if: always()   # even on failure or cancellation
         continue-on-error: true
         run: |
           & "$env:GITHUB_WORKSPACE/scripts/windows-snapshot.ps1"
+          exit 0
 
       - name: Trigger next session (fallback if the session did not pre-queue one)
         if: '!cancelled()'

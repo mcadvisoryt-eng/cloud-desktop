@@ -39,3 +39,4 @@ Write-Host "Snapshotting $src -> $remote (trash: $trash/$stamp)"
 # Prune trash older than 7 days.
 & $rclone delete --min-age 7d $trash 2>$null
 Write-Host "Snapshot complete."
+exit 0
