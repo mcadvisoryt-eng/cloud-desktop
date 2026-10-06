@@ -42,6 +42,7 @@ scripts/
   windows-snapshot.ps1   Windows encrypted backup
   provision-cloudvm.sh   Provision an Ubuntu VM as the desktop (Indian region)
   set-secrets.sh         Set the Actions secrets safely via the gh CLI
+  android-snapshot.sh    Android (redroid) encrypted backup
 TUNING.md   Linux/Actions latency tuning notes
 WINDOWS.md  Windows variant + the full latency picture
 MOBILE.md   Full Android (redroid) on a runner, viewed in a phone browser

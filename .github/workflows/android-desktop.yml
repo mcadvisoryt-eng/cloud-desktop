@@ -1,17 +1,19 @@
 name: android-desktop
 
-# A real, full Android OS on a GitHub-hosted Ubuntu runner — FREE, no KVM,
-# no emulator, no paid larger runner.
+# A real, full Android OS with Google Play, on a GitHub-hosted Ubuntu runner —
+# FREE, no KVM, no emulator, no paid larger runner.
 #
 # How: redroid ("remote android") runs Android's userspace directly as a
-# Docker container against the host kernel. It is NOT an emulator, so it needs
-# no hardware virtualisation — only the `binder` kernel module, which the
-# x86_64 ubuntu-latest runner image ships.
+# Docker container against the host kernel — not an emulator, so it needs no
+# hardware virtualisation, only the `binder` kernel module (which the x86_64
+# ubuntu-latest image ships).
 #
-# You view and control it from your phone's browser via ws-scrcpy (a
-# browser-based scrcpy client), over Tailscale.
+# Google Play is added by baking GApps into the image with redroid-script,
+# which patches the redroid image without recompiling it. MindTheGapps is used
+# because OpenGApps only supports Android 11.
 #
-# See MOBILE.md for the full picture and troubleshooting.
+# View and control it from your phone's browser via ws-scrcpy, over Tailscale.
+# See MOBILE.md for setup steps and troubleshooting.
 
 on:
   workflow_dispatch:
@@ -31,10 +33,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 345   # under GitHub's 6h (360m) hard cap
     env:
-      ANDROID_IMAGE: 'redroid/redroid:13.0.0-latest'
+      ANDROID_VERSION: '13.0.0'
       TS_HOSTNAME: 'cloudpc-android'
       SESSION_MINUTES: '330'
+      SNAPSHOT_EVERY_MIN: '30'
       WEB_PORT: '8000'
+      REMOTE: 'crypt1:android'        # encrypted backup of the Android data dir
+      TRASH_REMOTE: 'crypt1:trash'
+      DATA_DIR: '/var/redroid-data'
     steps:
       - uses: actions/checkout@v4
 
@@ -60,12 +66,11 @@ jobs:
         run: |
           set -x
           sudo apt-get update -qq
-          # binder_linux lives in linux-modules-extra on the runner's kernel.
           sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" adb || true
           sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" || echo "::warning::modprobe binder_linux failed"
           sudo modprobe fuse || true
-          # On kernel 6.x binder is a filesystem — the device nodes only appear
-          # after binderfs is mounted. This is the step most guides miss.
+          # On kernel 6.x binder is a filesystem — the nodes only appear after
+          # binderfs is mounted. This is the step most guides miss.
           if ! mountpoint -q /dev/binderfs; then
             sudo mkdir -p /dev/binderfs
             sudo mount -t binder binder /dev/binderfs || echo "::warning::binderfs mount failed"
@@ -76,19 +81,73 @@ jobs:
           ls -l /dev/binderfs 2>/dev/null || true
           lsmod | grep -E 'binder_linux|fuse' || true
 
-      - name: Start Android (redroid container)
+      - name: Restore Android data from encrypted backup
+        env:
+          RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          set -euo pipefail
+          sudo mkdir -p "$DATA_DIR"
+          sudo apt-get install -y -qq rclone || true
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONFIG_SECRET" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          if rclone listremotes 2>/dev/null | grep -q '^crypt1:$'; then
+            echo "Restoring $DATA_DIR from $REMOTE ..."
+            sudo RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf" rclone copy "$REMOTE/" "$DATA_DIR" \
+              --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line \
+              || echo "::warning::restore failed — starting with empty Android data"
+          else
+            echo "::warning::RCLONE_CONFIG missing or has no 'crypt1' remote — starting with empty Android data"
+          fi
+          # redroid runs as uid 1000 inside the container.
+          sudo chown -R 1000:1000 "$DATA_DIR" || true
+
+      - name: Build an Android image with Google Play (redroid-script)
         run: |
           set -x
-          sudo mkdir -p /var/redroid-data
+          sudo apt-get install -y -qq git python3-venv python3-pip
+          git clone --depth 1 https://github.com/ayasa520/redroid-script.git /tmp/redroid-script || true
+          if [ -d /tmp/redroid-script ]; then
+            cd /tmp/redroid-script
+            python3 -m venv .venv
+            . .venv/bin/activate
+            pip install -q -r requirements.txt
+            # -mtg = MindTheGapps (Play Store + Play Services)  [OpenGApps = 11 only]
+            # -i   = houdini (run ARM apps on this x86_64 host)
+            # -m   = Magisk (root)
+            python3 redroid.py -a "${ANDROID_VERSION}" -mtg -i -m -c docker \
+              || echo "::warning::GApps build failed — will fall back to plain AOSP redroid"
+          fi
+          sudo docker images --format '{{.Repository}}:{{.Tag}}' | head -20
+
+      - name: Start Android
+        run: |
+          set -x
+          IMG=$(sudo docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'mindthegapps|gapps' | head -1)
+          if [ -z "$IMG" ]; then
+            IMG="redroid/redroid:${ANDROID_VERSION}-latest"
+            sudo docker pull "$IMG" || true
+          fi
+          echo "using image: $IMG"
           sudo docker run -itd --rm --privileged --name android \
-            -v /var/redroid-data:/data \
+            -v "${DATA_DIR}:/data" \
             -p 5555:5555 \
-            "$ANDROID_IMAGE" \
+            "$IMG" \
             androidboot.redroid_width=720 \
             androidboot.redroid_height=1280 \
             androidboot.redroid_dpi=320 \
             androidboot.redroid_gpu_mode=guest \
-            androidboot.use_memfd=true
+            androidboot.use_memfd=true \
+            ro.setupwizard.mode=DISABLED \
+            ro.product.cpu.abilist=x86_64,x86,arm64-v8a,armeabi-v7a,armeabi \
+            ro.product.cpu.abilist64=x86_64,arm64-v8a \
+            ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi \
+            ro.dalvik.vm.isa.arm=x86 \
+            ro.dalvik.vm.isa.arm64=x86_64 \
+            ro.enable.native.bridge.exec=1 \
+            ro.vendor.enable.native.bridge.exec=1 \
+            ro.vendor.enable.native.bridge.exec64=1 \
+            ro.dalvik.vm.native.bridge=libhoudini.so
           sleep 5
           sudo docker ps -a
           echo "--- container log ---"
@@ -99,7 +158,7 @@ jobs:
           set -x
           adb start-server || true
           ok=0
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             adb connect localhost:5555 >/dev/null 2>&1 || true
             if adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; then
               echo "Android booted after ~$((i * 10))s"
@@ -109,9 +168,8 @@ jobs:
             sleep 10
           done
           adb devices || true
-          if [ "$ok" != 1 ]; then
-            echo "::warning::Android did not report sys.boot_completed within 10 min — continuing anyway"
-          fi
+          adb -s localhost:5555 shell getprop ro.build.version.release || true
+          [ "$ok" = 1 ] || echo "::warning::Android did not report sys.boot_completed within 15 min — continuing anyway"
 
       - name: Bring up Tailscale
         env:
@@ -132,8 +190,6 @@ jobs:
       - name: Install the web viewer (ws-scrcpy)
         run: |
           set -x
-          sudo apt-get install -y -qq git
-          # Browser-based scrcpy client — works with redroid; touch + keyboard.
           git clone --depth 1 https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy || true
           if [ -d /tmp/ws-scrcpy ]; then
             cd /tmp/ws-scrcpy
@@ -158,31 +214,37 @@ jobs:
             tail -20 /tmp/ws-scrcpy.log || true
           fi
 
-          start=$(date +%s)
-          prequeued=0
+          start=$(date +%s); last_snap=$start; prequeued=0
           while true; do
             now=$(date +%s)
             elapsed=$(( (now - start) / 60 ))
             remaining=$(( SESSION_MINUTES - elapsed ))
-            if [ "$remaining" -le 0 ]; then
-              echo "Session time budget reached after ${elapsed}m."
-              break
-            fi
-            # Keep the Android container alive.
+            if [ "$remaining" -le 0 ]; then echo "Session time budget reached after ${elapsed}m."; break; fi
+
             if ! sudo docker ps --format '{{.Names}}' | grep -q '^android$'; then
-              echo "::warning::android container is gone — stopping the session"
-              break
+              echo "::warning::android container is gone — stopping the session"; break
             fi
-            # Pre-queue the next runner shortly before the end.
+
             if [ "$prequeued" -eq 0 ] && [ "$remaining" -le 10 ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${GH_REPOSITORY:-}" ]; then
               if gh workflow run android-desktop.yml --repo "$GH_REPOSITORY" 2>/dev/null; then
-                echo "Next session pre-queued (${remaining}m left)."
-                prequeued=1
+                echo "Next session pre-queued (${remaining}m left)."; prequeued=1
               fi
             fi
+
+            if [ $(( (now - last_snap) / 60 )) -ge "$SNAPSHOT_EVERY_MIN" ]; then
+              echo "Periodic backup..."
+              bash "$GITHUB_WORKSPACE/scripts/android-snapshot.sh" || echo "::warning::periodic backup failed"
+              last_snap=$(date +%s)
+            fi
+
             sleep 15
           done
           echo "Session loop complete."
+
+      - name: Final backup
+        if: always()   # even on failure or cancellation
+        continue-on-error: true
+        run: bash "$GITHUB_WORKSPACE/scripts/android-snapshot.sh" || true
 
       - name: Trigger next session (fallback if the session did not pre-queue one)
         if: '!cancelled()'
