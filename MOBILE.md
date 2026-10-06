@@ -82,10 +82,10 @@ Worth being precise here, because "integrity" means two different things:
   and the Play Store behaves normally.
 - **Widevine L3** is baked into the image, so DRM playback works at L3 (SD
   quality) — the software tier.
-- **No root by default.** redroid is already rootable with `adb root`, so we
-  deliberately do **not** install Magisk: root is what makes integrity checks
-  complain. If you specifically want Magisk, add `-m` to the redroid-script
-  line — but accept that some apps will then refuse to run.
+- **Root is ON by default (Magisk, systemless).** That's the *opposite* of the
+  integrity story: apps that check for root — many banking, payment and some
+  streaming apps — will refuse to run. If you'd rather maximise compatibility,
+  remove `-m` from the redroid-script line.
 
 **Not possible — and I won't fake it:**
 - **Play Integrity API / SafetyNet hardware attestation.** These check for a
@@ -127,7 +127,7 @@ your safety net.
 | Google Play package | `-mtg` in the redroid-script line (`-lg` LiteGapps, `-g` OpenGApps = 11 only) |
 | ARM app translation | `-i` (houdini) — remove if it causes trouble |
 | Widevine DRM | `-w` |
-| Root (Magisk) | add `-m` — but see the Integrity section first |
+| Root (Magisk) | on by default (`-m`); remove it for better app compatibility |
 | Session length | `SESSION_MINUTES` (default 330) |
 
 ---

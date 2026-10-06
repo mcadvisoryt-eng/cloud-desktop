@@ -115,10 +115,11 @@ jobs:
             # -mtg = MindTheGapps (Play Store + Play Services)  [OpenGApps = 11 only]
             # -i   = houdini (run ARM apps on this x86_64 host)
             # -w   = Widevine L3 (DRM playback)
-            # NOTE: no -m (Magisk). Root is what makes integrity checks complain,
-            # and redroid is already rootable via `adb root`. Add -m only if you
-            # specifically want Magisk and accept that some apps will refuse to run.
-            python3 redroid.py -a "${ANDROID_VERSION}" -mtg -i -w -c docker \
+            # -m   = Magisk (full systemless root). NOTE: root is the opposite of
+            # the integrity story — apps that check for root (banking, some
+            # payment/streaming apps) will refuse to run. Remove -m for max
+            # compatibility.
+            python3 redroid.py -a "${ANDROID_VERSION}" -mtg -i -w -m -c docker \
               || echo "::warning::GApps build failed — will fall back to plain AOSP redroid"
           fi
           sudo docker images --format '{{.Repository}}:{{.Tag}}' | head -20
