@@ -12,16 +12,16 @@ they go.
    cannot be reached without these.
 3. Actions tab → pick a workflow → **Run workflow**.
 
-## The two desktops
+## The desktops
 
-| | Linux (XFCE) | Windows |
-|---|---|---|
-| Workflow | `cloud-desktop` | `windows-desktop` |
-| Host (MagicDNS) | `cloudpc.<your-tailnet>.ts.net` | `cloudpc-win.<your-tailnet>.ts.net` |
-| Port | 3389 | 3389 |
-| Username | `pc` | `pc` |
-| Password | `DESKTOP_PASSWORD` | `DESKTOP_PASSWORD` |
-| Protocol | RDP (xrdp) | RDP |
+| | Linux (XFCE) | Windows | Android |
+|---|---|---|---|
+| Workflow | `cloud-desktop` | `windows-desktop` | `android-desktop` |
+| Host (MagicDNS) | `cloudpc.<your-tailnet>.ts.net` | `cloudpc-win.<your-tailnet>.ts.net` | `cloudpc-android.<your-tailnet>.ts.net` |
+| Port | 3389 | 3389 | 8000 (browser) / 5555 (adb) |
+| Username | `pc` | `pc` | — |
+| Password | `DESKTOP_PASSWORD` | `DESKTOP_PASSWORD` | — |
+| Protocol | RDP (xrdp) | RDP | ws-scrcpy in your phone's browser |
 
 Replace `<your-tailnet>` with your tailnet name (shown in the Tailscale admin
 console, e.g. `tailxxxxx.ts.net`). You can also use the tailnet IP printed in

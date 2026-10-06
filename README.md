@@ -1,13 +1,15 @@
 # cloud-desktop
 
 A personal remote desktop you can reach from any device over Tailscale, with an
-encrypted backup of your home directory. There are three ways to run it — pick
-by how much latency you can tolerate.
+encrypted backup of your home directory. There are four ways to run it — pick
+by how much latency you can tolerate (or whether you want a real Android phone
+in the cloud).
 
 | Option | Where it runs | RTT from India | Cost | Docs |
 |---|---|---|---|---|
 | **Linux on GitHub Actions** | Ephemeral Ubuntu runner | ~180–250 ms | free (public repo) | `TUNING.md` |
 | **Windows on GitHub Actions** | Ephemeral Windows runner | ~180–250 ms | free (public repo) | `WINDOWS.md` |
+| **Android on GitHub Actions** | redroid container (full Android) | ~180–250 ms | free (public repo) | `MOBILE.md` |
 | **Cloud VM in India** ⭐ | Your own VM in an Indian region | **~5–30 ms** | free tier or ~$5–25/mo | `CLOUD-VM.md` |
 
 > **Latency, honestly.** 0–10 ms is a LAN number. GitHub's runners live in Azure
@@ -30,6 +32,7 @@ by how much latency you can tolerate.
 .github/workflows/
   desktop.yml            Linux desktop on a GitHub runner
   windows-desktop.yml    Windows desktop on a GitHub runner
+  android-desktop.yml    Full Android (redroid) on a GitHub runner
 scripts/
   run-session.sh         Linux session loop (health check, snapshot, pre-queue)
   snapshot.sh            Linux encrypted backup (idle-priority rclone)
@@ -41,6 +44,7 @@ scripts/
   set-secrets.sh         Set the Actions secrets safely via the gh CLI
 TUNING.md   Linux/Actions latency tuning notes
 WINDOWS.md  Windows variant + the full latency picture
+MOBILE.md   Full Android (redroid) on a runner, viewed in a phone browser
 CLOUD-VM.md Indian-region VM (the low-latency path)
 SECRETS.md  What to add and how to get each value
 CONNECT.md  How to reach the desktops
