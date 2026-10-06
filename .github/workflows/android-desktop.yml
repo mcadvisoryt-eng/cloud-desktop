@@ -114,8 +114,11 @@ jobs:
             pip install -q -r requirements.txt
             # -mtg = MindTheGapps (Play Store + Play Services)  [OpenGApps = 11 only]
             # -i   = houdini (run ARM apps on this x86_64 host)
-            # -m   = Magisk (root)
-            python3 redroid.py -a "${ANDROID_VERSION}" -mtg -i -m -c docker \
+            # -w   = Widevine L3 (DRM playback)
+            # NOTE: no -m (Magisk). Root is what makes integrity checks complain,
+            # and redroid is already rootable via `adb root`. Add -m only if you
+            # specifically want Magisk and accept that some apps will refuse to run.
+            python3 redroid.py -a "${ANDROID_VERSION}" -mtg -i -w -c docker \
               || echo "::warning::GApps build failed — will fall back to plain AOSP redroid"
           fi
           sudo docker images --format '{{.Repository}}:{{.Tag}}' | head -20
@@ -170,6 +173,25 @@ jobs:
           adb devices || true
           adb -s localhost:5555 shell getprop ro.build.version.release || true
           [ "$ok" = 1 ] || echo "::warning::Android did not report sys.boot_completed within 15 min — continuing anyway"
+
+      - name: Certify the device with Google (Play Protect)
+        run: |
+          set -x
+          adb connect localhost:5555 >/dev/null 2>&1 || true
+          adb -s localhost:5555 root >/dev/null 2>&1 || true
+          adb connect localhost:5555 >/dev/null 2>&1 || true
+          sleep 3
+          ID=$(adb -s localhost:5555 shell settings get secure android_id 2>/dev/null | tr -d '\r' | head -1)
+          if [ -z "$ID" ]; then
+            echo "::warning::could not read the Android ID — register it manually (see MOBILE.md)"
+            exit 0
+          fi
+          echo "::notice::Android ID = $ID"
+          # Best-effort automatic registration on Google's official page, so Play
+          # stops reporting the device as uncertified.
+          curl -s -o /dev/null -w 'registration HTTP %{http_code}\n' \
+            --data "id=$ID" "https://www.google.com/android/uncertified/" || true
+          echo "If Play still says 'device not certified', open https://www.google.com/android/uncertified/ and submit: $ID"
 
       - name: Bring up Tailscale
         env:
