@@ -17,6 +17,8 @@ LOG_REMOTE="${LOG_REMOTE:-crypt1:logs}"
 DATA_DIR="${DATA_DIR:-/var/redroid-data}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 LOG="/tmp/android-backup-${STAMP}.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXCLUDES="${EXCLUDES:-$SCRIPT_DIR/android-excludes.txt}"
 
 export RCLONE_CONFIG="${HOME}/.config/rclone/rclone.conf"
 
@@ -50,8 +52,7 @@ while :; do
         --backup-dir "${TRASH_REMOTE}/${STAMP}" \
         --transfers 8 --checkers 4 --fast-list \
         --stats 30s --stats-one-line \
-        --exclude '**/*.sock' \
-        --exclude '**/lost+found/**' >>"$LOG" 2>&1; then
+        --exclude-from "$EXCLUDES" >>"$LOG" 2>&1; then
     log "Backup complete."
     # Prune trash older than 7 days (best-effort).
     rc delete --min-age 7d "$TRASH_REMOTE" >>"$LOG" 2>&1 || true

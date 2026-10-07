@@ -133,6 +133,15 @@ Caveat: the backup is taken from a *running* Android, so it's crash-consistent
 at best — treat the last few minutes as unreliable. The 30-minute cadence is
 your safety net.
 
+**Caches are excluded.** `scripts/android-excludes.txt` keeps caches, dalvik
+and oat out of both the backup *and* the restore. Without it a restore pulled
+the caches back too and took an **hour**; with it the handoff is back to a
+couple of minutes. Apps, accounts and app data are all still included.
+
+**The Android screen is kept awake** at boot (`svc power stayon true`, screen
+timeout disabled, and a wake keyevent). A sleeping Android screen shows as a
+plain black viewer.
+
 ---
 
 ## Tuning

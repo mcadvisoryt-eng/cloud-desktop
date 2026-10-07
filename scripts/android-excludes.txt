@@ -1,0 +1,16 @@
+# Paths excluded from BOTH the Android backup and the restore.
+# These are caches and regenerable build artefacts: they are the bulk of the
+# bytes and are worthless to restore, so leaving them out makes the backup
+# small and the restore fast (it was taking an hour with them included).
+**/cache/**
+**/code_cache/**
+**/app_webview/**
+**/no_backup/**
+dalvik-cache/**
+**/oat/**
+**/*-journal
+**/*-wal
+**/*-shm
+**/*.tmp
+**/lost+found/**
+**/*.sock

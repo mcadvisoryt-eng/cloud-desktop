@@ -95,7 +95,8 @@ jobs:
           if rclone listremotes 2>/dev/null | grep -q '^crypt1:$'; then
             echo "Restoring $DATA_DIR from $REMOTE ..."
             if sudo RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf" rclone copy "$REMOTE/" "$DATA_DIR" \
-                 --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line 2>&1 | tee "$RLOG"; then
+                 --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line \
+                 --exclude-from "$GITHUB_WORKSPACE/scripts/android-excludes.txt" 2>&1 | tee "$RLOG"; then
               echo "Restore complete."
             else
               # A failed restore must not stop us: log it to Drive and boot fresh.
@@ -184,6 +185,11 @@ jobs:
           done
           adb devices || true
           adb -s localhost:5555 shell getprop ro.build.version.release || true
+          # Keep the Android display awake — a sleeping screen is a black screen
+          # in the viewer, and that is a very common cause of "it's just black".
+          adb -s localhost:5555 shell svc power stayon true || true
+          adb -s localhost:5555 shell settings put system screen_off_timeout 2147483647 || true
+          adb -s localhost:5555 shell input keyevent KEYCODE_WAKEUP || true
           [ "$ok" = 1 ] || echo "::warning::Android did not report sys.boot_completed within 15 min — continuing anyway"
 
       - name: Certify the device with Google (Play Protect)
