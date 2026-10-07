@@ -254,10 +254,24 @@ jobs:
         run: |
           set -x
           sudo apt-get update -qq
+          # scrcpy / x11vnc / novnc / websockify all live in universe.
+          sudo apt-get install -y -qq software-properties-common || true
+          sudo add-apt-repository -y universe || true
+          sudo apt-get update -qq || true
           sudo apt-get install -y -qq xvfb x11vnc scrcpy novnc websockify \
             || echo "::warning::some noVNC packages failed to install"
-          echo "--- tools present? ---"
+          echo "--- tools present? (MISSING means the install failed) ---"
           for b in Xvfb x11vnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
+          test -d /usr/share/novnc && echo "novnc web root: OK" || echo "MISSING: /usr/share/novnc"
+
+      - name: Install the serve-avd viewer (adb screenrecord -> WebCodecs)
+        run: |
+          set -x
+          # A single-tool browser viewer: captures the screen with
+          # `adb screenrecord` and streams H.264 to the browser over WebCodecs.
+          # No Xvfb, no scrcpy, no x11vnc, no websockify — far fewer pieces to
+          # fail than the noVNC chain.
+          npx -y serve-avd --help >/dev/null 2>&1 || echo "::warning::could not pre-fetch serve-avd"
 
       - name: Serve Android + run session
         env:
@@ -288,6 +302,14 @@ jobs:
           sleep 2
           for f in xvfb scrcpy x11vnc websockify; do echo "--- $f ---"; tail -5 "/tmp/$f.log" || true; done
           echo "::notice::noVNC viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html"
+
+          # --- Viewer #3: serve-avd. Single tool, no Xvfb/scrcpy/x11vnc/websockify
+          # chain — it grabs the screen with `adb screenrecord` and streams H.264
+          # to the browser via WebCodecs. Simplest of the three, so try it first. ---
+          nohup npx -y serve-avd localhost:5555 --host 0.0.0.0 --port 3200 >/tmp/serve-avd.log 2>&1 &
+          sleep 10
+          echo "--- serve-avd ---"; tail -15 /tmp/serve-avd.log || true
+          echo "::notice::serve-avd viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
 
           start=$(date +%s); last_snap=$start; prequeued=0
           while true; do

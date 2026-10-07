@@ -47,15 +47,17 @@ On the phone, Tailscale connected to the same tailnet — a `cloudpc-android`
 device appears.
 
 ### 4. Open it in your phone's browser
+
+Three viewers run at once, so if one fails the next may not. Try them in order:
 ```
-http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html
+http://cloudpc-android.<your-tailnet>.ts.net:3200/          serve-avd  (try first)
+http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html  noVNC
+http://cloudpc-android.<your-tailnet>.ts.net:8000           ws-scrcpy
 ```
-That's **noVNC** — plain VNC in the browser, the most robust viewer (tap to
-touch, keyboard, clipboard). A second viewer, **ws-scrcpy**, also runs on port
-**8000** if you prefer:
-```
-http://cloudpc-android.<your-tailnet>.ts.net:8000
-```
+- **`:3200` — serve-avd**: the simplest chain (`adb screenrecord` → WebCodecs in
+the browser). No Xvfb/scrcpy/x11vnc/websockify to go wrong, so start here.
+- **`:6080` — noVNC**: VNC in the browser, backed by scrcpy → Xvfb → x11vnc.
+- **`:8000` — ws-scrcpy**: last resort; it can hang on "Waiting for info…".
 
 ### 5. Sign in to Google
 Open the Play Store and sign in with your Google account.
