@@ -18,10 +18,10 @@ they go.
 |---|---|---|---|
 | Workflow | `cloud-desktop` | `windows-desktop` | `android-desktop` |
 | Host (MagicDNS) | `cloudpc.<your-tailnet>.ts.net` | `cloudpc-win.<your-tailnet>.ts.net` | `cloudpc-android.<your-tailnet>.ts.net` |
-| Port | 3389 | 3389 | 8000 (browser) / 5555 (adb) |
+| Port | 3389 | 3389 | 6080 (noVNC) / 8000 (ws-scrcpy) / 5555 (adb) |
 | Username | `pc` | `pc` | — |
 | Password | `DESKTOP_PASSWORD` | `DESKTOP_PASSWORD` | — |
-| Protocol | RDP (xrdp) | RDP | ws-scrcpy in your phone's browser |
+| Protocol | RDP (xrdp) | RDP | noVNC (VNC in the browser) |
 
 Replace `<your-tailnet>` with your tailnet name (shown in the Tailscale admin
 console, e.g. `tailxxxxx.ts.net`). You can also use the tailnet IP printed in

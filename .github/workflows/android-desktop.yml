@@ -221,7 +221,7 @@ jobs:
             --hostname="$TS_HOSTNAME" \
             --accept-routes
           TS_IP=$(tailscale ip -4 | head -1 || echo 'unknown')
-          echo "::notice::Android ready at ${TS_IP} — open http://${TS_HOSTNAME}.<your-tailnet>.ts.net:${WEB_PORT} on your phone"
+          echo "::notice::Android ready at ${TS_IP} — viewers: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html (noVNC) and :${WEB_PORT} (ws-scrcpy)"
 
       - name: Install the web viewer (ws-scrcpy)
         run: |
@@ -235,6 +235,15 @@ jobs:
             echo "::warning::could not clone ws-scrcpy"
           fi
 
+      - name: Install the noVNC viewer (scrcpy -> Xvfb -> x11vnc -> noVNC)
+        run: |
+          set -x
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb x11vnc scrcpy novnc websockify \
+            || echo "::warning::some noVNC packages failed to install"
+          echo "--- tools present? ---"
+          for b in Xvfb x11vnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
+
       - name: Serve Android + run session
         env:
           GH_TOKEN: ${{ secrets.RESTART_PAT }}
@@ -243,12 +252,27 @@ jobs:
           set -x
           # Start the browser viewer in the background (survives this step).
           if [ -d /tmp/ws-scrcpy ]; then
-            cd /tmp/ws-scrcpy
-            nohup npm start > /tmp/ws-scrcpy.log 2>&1 &
+            ( cd /tmp/ws-scrcpy && nohup npm start > /tmp/ws-scrcpy.log 2>&1 & )
             sleep 8
             echo "--- ws-scrcpy log ---"
             tail -20 /tmp/ws-scrcpy.log || true
           fi
+
+          # --- Viewer #2: scrcpy renders Android into a virtual X display,
+          # x11vnc serves that display, websockify+noVNC put it in the browser.
+          # This is the path the community settled on after dropping ws-scrcpy
+          # and MSE as less reliable. ws-scrcpy stays up as a fallback. ---
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 540x960x24 >/tmp/xvfb.log 2>&1 &
+          sleep 2
+          scrcpy -s localhost:5555 --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
+          sleep 5
+          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
+          sleep 2
+          websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
+          sleep 2
+          for f in xvfb scrcpy x11vnc websockify; do echo "--- $f ---"; tail -5 "/tmp/$f.log" || true; done
+          echo "::notice::noVNC viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html"
 
           start=$(date +%s); last_snap=$start; prequeued=0
           while true; do

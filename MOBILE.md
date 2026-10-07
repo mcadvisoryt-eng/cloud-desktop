@@ -48,10 +48,14 @@ device appears.
 
 ### 4. Open it in your phone's browser
 ```
+http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html
+```
+That's **noVNC** — plain VNC in the browser, the most robust viewer (tap to
+touch, keyboard, clipboard). A second viewer, **ws-scrcpy**, also runs on port
+**8000** if you prefer:
+```
 http://cloudpc-android.<your-tailnet>.ts.net:8000
 ```
-That's **ws-scrcpy**, a browser client for scrcpy that works with redroid — tap
-to touch, multi-touch, keyboard, clipboard, rotation.
 
 ### 5. Sign in to Google
 Open the Play Store and sign in with your Google account.
@@ -177,8 +181,12 @@ Android won't boot — check that first.
 - **Container exits immediately** → `sudo docker logs android`.
 - **GApps build failed** → the workflow falls back to plain AOSP redroid (no
   Play Store) and warns; check the redroid-script output.
-- **`http://…:8000` doesn't load** → check the ws-scrcpy log in the
-  "Serve Android + run session" step.
+- **`…:6080/vnc.html` doesn't load** → check the `--- xvfb ---`, `--- scrcpy ---`,
+  `--- x11vnc ---` and `--- websockify ---` tails printed by the
+  "Serve Android + run session" step; they name whichever piece failed.
+- **ws-scrcpy on `:8000` hangs on "Waiting for info…"** → that's a known
+  ws-scrcpy flaw (it stalls fetching device info). Use noVNC on `:6080` instead;
+  ws-scrcpy is only kept as a fallback.
 - **Play Store says "device not certified"** → the run log prints the Android
   ID; submit it at <https://www.google.com/android/uncertified/>.
 - **Play Store crashes / bounces you to the home screen** → almost always an
