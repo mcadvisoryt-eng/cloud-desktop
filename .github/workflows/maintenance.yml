@@ -17,13 +17,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'list = just show devices; clean-stale = delete offline ones'
+        description: 'list = show devices; clean-stale = delete offline ones; kvm = probe runner virtualisation support'
         required: true
         default: 'list'
         type: choice
         options:
           - list
           - clean-stale
+          - kvm
       name_prefix:
         description: 'Only devices whose name starts with this are considered for deletion'
         required: false
@@ -58,6 +59,23 @@ jobs:
           echo "--- name | id | lastSeen | state ---"
           jq -r '.devices[] | [.name, .id, (.lastSeen // "-"), (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
             /tmp/devices.json | column -t -s $'\t' || cat /tmp/devices.json
+
+      - name: Probe KVM / virtualisation support (decides emulator vs redroid)
+        if: ${{ github.event.inputs.action == 'kvm' }}
+        run: |
+          set -x
+          echo "=== /dev/kvm ==="
+          ls -l /dev/kvm || echo "NO /dev/kvm device"
+          echo "=== CPU virtualisation flags (vmx = Intel, svm = AMD) ==="
+          grep -m1 -oE 'vmx|svm' /proc/cpuinfo || echo "no vmx/svm in /proc/cpuinfo"
+          echo "=== kvm kernel modules ==="
+          lsmod | grep -i kvm || echo "no kvm modules loaded"
+          echo "=== nested virtualisation setting ==="
+          cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo "no kvm_intel nested param"
+          cat /sys/module/kvm_amd/parameters/nested 2>/dev/null || echo "no kvm_amd nested param"
+          echo "=== binder module present? (redroid needs this) ==="
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>/dev/null && echo "binder_linux OK" || echo "binder_linux failed"
+          grep binder /proc/filesystems || true
 
       - name: Clean stale (offline) devices
         if: ${{ github.event.inputs.action == 'clean-stale' }}
