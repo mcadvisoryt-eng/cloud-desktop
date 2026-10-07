@@ -23,9 +23,16 @@ they go.
 | Password | `DESKTOP_PASSWORD` | `DESKTOP_PASSWORD` | — |
 | Protocol | RDP (xrdp) | RDP | noVNC (VNC in the browser) |
 
+**Always connect by the MagicDNS name, never the IP.** Each run is a brand-new
+machine, so the `100.x` tailnet IP changes every single time — but the name
+(`cloudpc`, `cloudpc-win`, `cloudpc-android`) never does. Set your RDP/VNC client
+up once with the name and it keeps working forever.
+
 Replace `<your-tailnet>` with your tailnet name (shown in the Tailscale admin
-console, e.g. `tailxxxxx.ts.net`). You can also use the tailnet IP printed in
-the run log (`::notice::... ready at <ip>`).
+console, e.g. `tailxxxxx.ts.net`). The run log also prints the name it was
+given (`::notice::... ready at ...`) — worth a glance, because if dead runners
+pile up Tailscale renames you to `cloudpc-win-1` and the plain name points at a
+corpse. An **ephemeral** `TS_AUTHKEY` prevents that.
 
 ## Secrets
 
