@@ -1,0 +1,97 @@
+name: maintenance
+
+# Tailnet housekeeping — because dead runners pile up as `cloudpc-android`,
+# `cloudpc-android-1`, `cloudpc-win-2`, … and then the plain name resolves to a
+# corpse.
+#
+# Requires a Tailscale **API access token** (NOT the auth key — that only joins
+# nodes). Create one: Tailscale admin console -> Settings -> Keys ->
+# "Generate access token", then:
+#     gh secret set TS_API_KEY --repo <owner>/<repo>
+#
+# Run it with action=list to just look, or action=clean-stale to delete every
+# offline device whose name starts with the prefix. Online devices are never
+# touched, so a live desktop can't be removed by accident.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'list = just show devices; clean-stale = delete offline ones'
+        required: true
+        default: 'list'
+        type: choice
+        options:
+          - list
+          - clean-stale
+      name_prefix:
+        description: 'Only devices whose name starts with this are considered for deletion'
+        required: false
+        default: 'cloudpc'
+
+permissions:
+  contents: read
+
+jobs:
+  tailnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the API key is present
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TS_API_KEY:-}" ]; then
+            echo "::error::TS_API_KEY is not set. This is a Tailscale API access token (admin console -> Settings -> Keys -> Generate access token), NOT the auth key. Add it with: gh secret set TS_API_KEY"
+            exit 1
+          fi
+          echo "TS_API_KEY is present."
+
+      - name: List tailnet devices
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json
+          echo "--- name | id | lastSeen | state ---"
+          jq -r '.devices[] | [.name, .id, (.lastSeen // "-"), (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
+            /tmp/devices.json | column -t -s $'\t' || cat /tmp/devices.json
+
+      - name: Clean stale (offline) devices
+        if: ${{ github.event.inputs.action == 'clean-stale' }}
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+          PREFIX: ${{ github.event.inputs.name_prefix }}
+        run: |
+          set -euo pipefail
+          PREFIX="${PREFIX:-cloudpc}"
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json
+
+          # Every offline device whose name starts with the prefix. Online ones
+          # (a live desktop) are deliberately left alone.
+          mapfile -t ROWS < <(jq -r --arg p "$PREFIX" \
+            '.devices[] | select((.name | startswith($p)) and (.connectedToControl == false)) | "\(.id)\t\(.name)"' \
+            /tmp/devices.json)
+
+          if [ "${#ROWS[@]}" -eq 0 ]; then
+            echo "Nothing stale to remove (no offline '${PREFIX}*' devices)."
+            exit 0
+          fi
+
+          for row in "${ROWS[@]}"; do
+            id="${row%%$'\t'*}"; name="${row##*$'\t'}"
+            echo "deleting stale device: ${name} (${id})"
+            curl -fsS -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
+              "https://api.tailscale.com/api/v2/device/${id}" \
+              && echo "  removed ${name}" \
+              || echo "::warning::could not remove ${name} (${id})"
+          done
+
+          echo "--- devices after cleanup ---"
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" \
+            | jq -r '.devices[] | [.name, (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
+            | column -t -s $'\t' || true
