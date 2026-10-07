@@ -48,16 +48,17 @@ device appears.
 
 ### 4. Open it in your phone's browser
 
-Three viewers run at once, so if one fails the next may not. Try them in order:
+Three viewers run at once, so if one fails the next may not:
 ```
 http://cloudpc-android.<your-tailnet>.ts.net:3200/          serve-avd  (try first)
 http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html  noVNC
-http://cloudpc-android.<your-tailnet>.ts.net:8000           ws-scrcpy
+cloudpc-android.<your-tailnet>.ts.net:5900                  raw VNC (native app)
 ```
 - **`:3200` — serve-avd**: the simplest chain (`adb screenrecord` → WebCodecs in
 the browser). No Xvfb/scrcpy/x11vnc/websockify to go wrong, so start here.
 - **`:6080` — noVNC**: VNC in the browser, backed by scrcpy → Xvfb → x11vnc.
-- **`:8000` — ws-scrcpy**: last resort; it can hang on "Waiting for info…".
+- **`:5900` — raw VNC**: for a native VNC app (RealVNC Viewer, bVNC) — the
+  closest thing to the Windows App for RDP.
 
 ### 5. Sign in to Google
 Open the Play Store and sign in with your Google account.
@@ -146,6 +147,24 @@ plain black viewer.
 
 ---
 
+## Keeping the name stable (important)
+
+Every run joins your tailnet as `cloudpc-android`. If dead nodes from finished
+runs aren't removed, Tailscale renames the live one to `cloudpc-android-1`
+(`-2`, …) and the plain name resolves to a corpse — which looks exactly like
+"the URL won't load".
+
+**Fix: make `TS_AUTHKEY` Ephemeral.** Regenerate it in the Tailscale admin
+console with *Ephemeral: yes*, then:
+```
+gh secret set TS_AUTHKEY --repo <owner>/<repo>
+```
+Dead runners then remove themselves and the name always belongs to the live
+one. The run log's `--- tailscale status ---` line shows the name actually
+assigned, so you can confirm.
+
+---
+
 ## Tuning
 
 ### Making it less laggy (do this first)
@@ -207,9 +226,8 @@ Android won't boot — check that first.
 - **`…:6080/vnc.html` doesn't load** → check the `--- xvfb ---`, `--- scrcpy ---`,
   `--- x11vnc ---` and `--- websockify ---` tails printed by the
   "Serve Android + run session" step; they name whichever piece failed.
-- **ws-scrcpy on `:8000` hangs on "Waiting for info…"** → that's a known
-  ws-scrcpy flaw (it stalls fetching device info). Use noVNC on `:6080` instead;
-  ws-scrcpy is only kept as a fallback.
+- **A tool says `MISSING:`** in the "Install packages" step → that package
+  didn't install; that's why its viewer is dead.
 - **Play Store says "device not certified"** → the run log prints the Android
   ID; submit it at <https://www.google.com/android/uncertified/>.
 - **Play Store crashes / bounces you to the home screen** → almost always an

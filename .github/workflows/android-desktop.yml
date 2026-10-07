@@ -8,11 +8,15 @@ name: android-desktop
 # hardware virtualisation, only the `binder` kernel module (which the x86_64
 # ubuntu-latest image ships).
 #
-# Google Play is added by baking GApps into the image with redroid-script,
-# which patches the redroid image without recompiling it. MindTheGapps is used
-# because OpenGApps only supports Android 11.
+# Google Play is added by baking GApps into the image with redroid-script.
+# LiteGapps is used because MindTheGapps is arm64 and crashes on this x86_64
+# host.
 #
-# View and control it from your phone's browser via ws-scrcpy, over Tailscale.
+# Viewers (three run at once so if one fails the next may not):
+#   :3200  serve-avd  — single tool, adb screenrecord -> WebCodecs (try first)
+#   :6080  noVNC      — VNC in the browser via scrcpy -> Xvfb -> x11vnc
+#   :5900  raw VNC    — for a native VNC app (RealVNC Viewer, bVNC)
+#
 # See MOBILE.md for setup steps and troubleshooting.
 
 on:
@@ -32,17 +36,48 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 345   # under GitHub's 6h (360m) hard cap
+    defaults:
+      run:
+        shell: bash
     env:
       ANDROID_VERSION: '13.0.0'
       TS_HOSTNAME: 'cloudpc-android'
       SESSION_MINUTES: '330'
       SNAPSHOT_EVERY_MIN: '30'
-      WEB_PORT: '8000'
       REMOTE: 'crypt1:android'        # encrypted backup of the Android data dir
       TRASH_REMOTE: 'crypt1:trash'
       DATA_DIR: '/var/redroid-data'
+      DEBIAN_FRONTEND: 'noninteractive'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache APT package archives
+        uses: actions/cache@v4
+        with:
+          path: apt-archives
+          key: apt-android-v1
+          restore-keys: |
+            apt-android-
+
+      - name: Install packages (with APT cache)
+        run: |
+          set -x
+          mkdir -p apt-archives
+          # Reuse .debs from previous runs so we don't re-download them.
+          sudo cp -a apt-archives/. /var/cache/apt/archives/ 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq software-properties-common || true
+          sudo add-apt-repository -y universe || true
+          sudo apt-get update -qq || true
+          sudo apt-get install -y -qq \
+            "linux-modules-extra-$(uname -r)" \
+            adb rclone git python3-venv python3-pip \
+            xvfb x11vnc scrcpy novnc websockify \
+            || echo "::warning::some packages failed to install"
+          cp -a /var/cache/apt/archives/*.deb apt-archives/ 2>/dev/null || true
+          echo "--- tools present? (MISSING means the install failed) ---"
+          for b in adb rclone Xvfb x11vnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
+          test -d /usr/share/novnc && echo "novnc web root: OK" || echo "MISSING: /usr/share/novnc"
 
       - name: Guard — cancel this run if another session is already active
         env:
@@ -61,12 +96,11 @@ jobs:
             gh run cancel "$GITHUB_RUN_ID" --repo "$GH_REPO" || true
             sleep 15
           fi
+          exit 0
 
       - name: Load the binder kernel modules (redroid needs these)
         run: |
           set -x
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" adb || true
           sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" || echo "::warning::modprobe binder_linux failed"
           sudo modprobe fuse || true
           # On kernel 6.x binder is a filesystem — the nodes only appear after
@@ -87,7 +121,6 @@ jobs:
         run: |
           set -euo pipefail
           sudo mkdir -p "$DATA_DIR"
-          sudo apt-get install -y -qq rclone || true
           mkdir -p ~/.config/rclone
           printf '%s' "$RCLONE_CONFIG_SECRET" > ~/.config/rclone/rclone.conf
           chmod 600 ~/.config/rclone/rclone.conf
@@ -95,7 +128,7 @@ jobs:
           if rclone listremotes 2>/dev/null | grep -q '^crypt1:$'; then
             echo "Restoring $DATA_DIR from $REMOTE ..."
             if sudo RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf" rclone copy "$REMOTE/" "$DATA_DIR" \
-                 --transfers 16 --checkers 16 --fast-list --stats 30s --stats-one-line \
+                 --transfers 32 --checkers 32 --fast-list --stats 30s --stats-one-line \
                  --exclude-from "$GITHUB_WORKSPACE/scripts/android-excludes.txt" 2>&1 | tee "$RLOG"; then
               echo "Restore complete."
             else
@@ -115,17 +148,13 @@ jobs:
       - name: Build an Android image with Google Play (redroid-script)
         run: |
           set -x
-          sudo apt-get install -y -qq git python3-venv python3-pip
           git clone --depth 1 https://github.com/ayasa520/redroid-script.git /tmp/redroid-script || true
           if [ -d /tmp/redroid-script ]; then
             cd /tmp/redroid-script
             python3 -m venv .venv
             . .venv/bin/activate
             pip install -q -r requirements.txt
-            # -lg = LiteGapps (Play Store + Play Services). We use LiteGapps
-            # rather than MindTheGapps because MTG is built for arm64, and on
-            # this x86_64 host its arm64 Google apps crash (Play Store quitting
-            # straight to the home screen). LiteGapps ships real x86_64 builds.
+            # -lg = LiteGapps (Play Store + Play Services), x86_64 builds.
             # -i  = houdini (run ARM apps on this x86_64 host)
             # -w  = Widevine L3 (DRM playback)
             # -m  = Magisk (root). NOTE: root fights integrity — apps that check
@@ -138,7 +167,7 @@ jobs:
       - name: Start Android
         run: |
           set -x
-          IMG=$(sudo docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'mindthegapps|gapps' | head -1)
+          IMG=$(sudo docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'litegapps|gapps|mindthegapps' | head -1)
           if [ -z "$IMG" ]; then
             IMG="redroid/redroid:${ANDROID_VERSION}-latest"
             sudo docker pull "$IMG" || true
@@ -185,11 +214,14 @@ jobs:
           done
           adb devices || true
           adb -s localhost:5555 shell getprop ro.build.version.release || true
-          # Keep the Android display awake — a sleeping screen is a black screen
-          # in the viewer, and that is a very common cause of "it's just black".
+          # Keep the display awake — a sleeping screen shows as a black viewer.
           adb -s localhost:5555 shell svc power stayon true || true
           adb -s localhost:5555 shell settings put system screen_off_timeout 2147483647 || true
           adb -s localhost:5555 shell input keyevent KEYCODE_WAKEUP || true
+          # Kill animations: less work per frame, so the stream feels snappier.
+          adb -s localhost:5555 shell settings put global window_animation_scale 0 || true
+          adb -s localhost:5555 shell settings put global transition_animation_scale 0 || true
+          adb -s localhost:5555 shell settings put global animator_duration_scale 0 || true
           [ "$ok" = 1 ] || echo "::warning::Android did not report sys.boot_completed within 15 min — continuing anyway"
 
       - name: Certify the device with Google (Play Protect)
@@ -205,8 +237,6 @@ jobs:
             exit 0
           fi
           echo "::notice::Android ID = $ID"
-          # Best-effort automatic registration on Google's official page, so Play
-          # stops reporting the device as uncertified.
           curl -s -o /dev/null -w 'registration HTTP %{http_code}\n' \
             --data "id=$ID" "https://www.google.com/android/uncertified/" || true
           echo "If Play still says 'device not certified', open https://www.google.com/android/uncertified/ and submit: $ID"
@@ -236,41 +266,20 @@ jobs:
             --hostname="$TS_HOSTNAME" \
             --accept-routes
           TS_IP=$(tailscale ip -4 | head -1 || echo 'unknown')
-          echo "::notice::Android ready at ${TS_IP} — viewers: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html (noVNC) and :${WEB_PORT} (ws-scrcpy)"
-
-      - name: Install the web viewer (ws-scrcpy)
-        run: |
-          set -x
-          git clone --depth 1 https://github.com/NetrisTV/ws-scrcpy.git /tmp/ws-scrcpy || true
-          if [ -d /tmp/ws-scrcpy ]; then
-            cd /tmp/ws-scrcpy
-            npm install || echo "::warning::npm install failed"
-            npm run dist || echo "::warning::client build failed"
-          else
-            echo "::warning::could not clone ws-scrcpy"
-          fi
-
-      - name: Install the noVNC viewer (scrcpy -> Xvfb -> x11vnc -> noVNC)
-        run: |
-          set -x
-          sudo apt-get update -qq
-          # scrcpy / x11vnc / novnc / websockify all live in universe.
-          sudo apt-get install -y -qq software-properties-common || true
-          sudo add-apt-repository -y universe || true
-          sudo apt-get update -qq || true
-          sudo apt-get install -y -qq xvfb x11vnc scrcpy novnc websockify \
-            || echo "::warning::some noVNC packages failed to install"
-          echo "--- tools present? (MISSING means the install failed) ---"
-          for b in Xvfb x11vnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
-          test -d /usr/share/novnc && echo "novnc web root: OK" || echo "MISSING: /usr/share/novnc"
+          # Show the name Tailscale actually gave us. If stale nodes from dead
+          # runs are still registered, we get renamed to cloudpc-android-1 and
+          # the plain name resolves to a corpse. An EPHEMERAL auth key stops
+          # that (see MOBILE.md).
+          echo "--- tailscale status ---"
+          tailscale status | head -5 || true
+          echo "::notice::Android ready at ${TS_IP} — serve-avd http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/ , noVNC :6080/vnc.html , raw VNC :5900"
 
       - name: Install the serve-avd viewer (adb screenrecord -> WebCodecs)
         run: |
           set -x
-          # A single-tool browser viewer: captures the screen with
-          # `adb screenrecord` and streams H.264 to the browser over WebCodecs.
-          # No Xvfb, no scrcpy, no x11vnc, no websockify — far fewer pieces to
-          # fail than the noVNC chain.
+          # Single-tool browser viewer: captures with `adb screenrecord` and
+          # streams H.264 to the browser over WebCodecs. No Xvfb/scrcpy/x11vnc/
+          # websockify — far fewer pieces to fail. Try :3200 first.
           npx -y serve-avd --help >/dev/null 2>&1 || echo "::warning::could not pre-fetch serve-avd"
 
       - name: Serve Android + run session
@@ -279,37 +288,26 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           set -x
-          # Start the browser viewer in the background (survives this step).
-          if [ -d /tmp/ws-scrcpy ]; then
-            ( cd /tmp/ws-scrcpy && nohup npm start > /tmp/ws-scrcpy.log 2>&1 & )
-            sleep 8
-            echo "--- ws-scrcpy log ---"
-            tail -20 /tmp/ws-scrcpy.log || true
-          fi
+          # --- Viewer #1: serve-avd (simplest; try this one first) ---
+          nohup npx -y serve-avd localhost:5555 --host 0.0.0.0 --port 3200 >/tmp/serve-avd.log 2>&1 &
+          sleep 10
+          echo "--- serve-avd ---"; tail -15 /tmp/serve-avd.log || true
+          echo "::notice::serve-avd viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
 
           # --- Viewer #2: scrcpy renders Android into a virtual X display,
-          # x11vnc serves that display, websockify+noVNC put it in the browser.
-          # This is the path the community settled on after dropping ws-scrcpy
-          # and MSE as less reliable. ws-scrcpy stays up as a fallback. ---
+          # x11vnc serves that display, websockify+noVNC put it in the browser,
+          # and x11vnc is also reachable directly on 5900 for a native VNC app. ---
           export DISPLAY=:99
           Xvfb :99 -screen 0 540x960x24 >/tmp/xvfb.log 2>&1 &
           sleep 2
           scrcpy -s localhost:5555 --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
           sleep 5
-          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
+          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -listen 0.0.0.0 >/tmp/x11vnc.log 2>&1 &
           sleep 2
           websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
           sleep 2
           for f in xvfb scrcpy x11vnc websockify; do echo "--- $f ---"; tail -5 "/tmp/$f.log" || true; done
-          echo "::notice::noVNC viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html"
-
-          # --- Viewer #3: serve-avd. Single tool, no Xvfb/scrcpy/x11vnc/websockify
-          # chain — it grabs the screen with `adb screenrecord` and streams H.264
-          # to the browser via WebCodecs. Simplest of the three, so try it first. ---
-          nohup npx -y serve-avd localhost:5555 --host 0.0.0.0 --port 3200 >/tmp/serve-avd.log 2>&1 &
-          sleep 10
-          echo "--- serve-avd ---"; tail -15 /tmp/serve-avd.log || true
-          echo "::notice::serve-avd viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
+          echo "::notice::noVNC viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html (raw VNC on :5900)"
 
           start=$(date +%s); last_snap=$start; prequeued=0
           while true; do
