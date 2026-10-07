@@ -179,9 +179,14 @@ at best — treat the last few minutes as unreliable. The 30-minute cadence is
 your safety net.
 
 **Caches are excluded.** `scripts/android-excludes.txt` keeps caches, dalvik
-and oat out of both the backup *and* the restore. Without it a restore pulled
-the caches back too and took an **hour**; with it the handoff is back to a
-couple of minutes. Apps, accounts and app data are all still included.
+and oat out of both the backup *and* the restore.
+
+**The restore is scoped, and capped.** `scripts/android-restore.sh` restores only
+`data/ app/ system/ misc/ local/ user/` — not the whole root — because restoring
+everything made rclone enumerate the entire encrypted tree and stall for tens of
+minutes with no output. `media/` (photos, downloads) is therefore **not**
+restored, and the whole restore is wrapped in a 10-minute `timeout`, so a slow
+remote can never hang the boot — it starts with whatever did restore.
 
 **The Android screen is kept awake** at boot (`svc power stayon true`, screen
 timeout disabled, and a wake keyevent). A sleeping Android screen shows as a
