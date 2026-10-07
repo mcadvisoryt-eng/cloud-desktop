@@ -50,10 +50,15 @@ device appears.
 
 Three viewers run at once, so if one fails the next may not:
 ```
-http://cloudpc-android.<your-tailnet>.ts.net:3200/          stream-droid (scrcpy)  (try first)
+http://cloudpc-android.<your-tailnet>.ts.net:8079/          webscreen (WebRTC) — try FIRST
+http://cloudpc-android.<your-tailnet>.ts.net:3200/          stream-droid (scrcpy)
 http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html  noVNC
 cloudpc-android.<your-tailnet>.ts.net:5900                  raw VNC (native app)
 ```
+- **`:8079` — webscreen, WebRTC**: the lowest-latency transport (UDP, no
+  smoothing buffer, its own NAT traversal). Enter the 6-digit PIN (`123456` by
+  default), then the Android device should be listed — click it to connect. If
+  it isn't listed, connect it by hand with ip `127.0.0.1`, port `5555`.
 - **`:3200` — stream-droid, scrcpy backend**: scrcpy encodes H.264 **on the
 device** and streams it natively, decoded via WebCodecs/MSE. This is the
 high-frame-rate path. (The previous `serve-avd` viewer captured with

@@ -48,6 +48,7 @@ jobs:
       TRASH_REMOTE: 'crypt1:trash'
       DATA_DIR: '/var/redroid-data'
       DEBIAN_FRONTEND: 'noninteractive'
+      WEBSCREEN_PIN: '123456'          # 6-digit PIN for the webscreen WebRTC viewer
     steps:
       - uses: actions/checkout@v4
 
@@ -297,6 +298,22 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           set -x
+          # --- Viewer #0: webscreen — WebRTC (lowest latency; see TUNNEL.md).
+          # WebRTC does its own NAT traversal, uses UDP, and renders frames as
+          # they arrive instead of buffering them for smoothness. ---
+          WS_PIN="${WEBSCREEN_PIN:-123456}"
+          if [ ! -x /tmp/webscreen ]; then
+            curl -fsSL -o /tmp/webscreen \
+              https://github.com/huonwe/webscreen/releases/latest/download/webscreen-linux-amd64 \
+              && chmod +x /tmp/webscreen || echo "::warning::could not download webscreen"
+          fi
+          if [ -x /tmp/webscreen ]; then
+            nohup /tmp/webscreen -host 0.0.0.0 -port 8079 -pin "$WS_PIN" >/tmp/webscreen.log 2>&1 &
+            sleep 5
+            echo "--- webscreen ---"; tail -10 /tmp/webscreen.log || true
+            echo "::notice::webscreen (WebRTC) ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:8079  PIN ${WS_PIN}"
+          fi
+
           # --- Viewer #1: stream-droid with the scrcpy backend. scrcpy does the
           # H.264 encoding on the device and streams it natively, so this is the
           # high-frame-rate path (unlike serve-avd's screenrecord/MJPEG). ---

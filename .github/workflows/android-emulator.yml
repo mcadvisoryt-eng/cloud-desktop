@@ -37,6 +37,7 @@ jobs:
       TS_HOSTNAME: 'cloudpc-emu'
       SESSION_MINUTES: '330'
       API_LEVEL: '34'
+      WEBSCREEN_PIN: '123456'          # 6-digit PIN for the webscreen WebRTC viewer
       GH_TOKEN: ${{ secrets.RESTART_PAT }}
       GH_REPOSITORY: ${{ github.repository }}
     steps:

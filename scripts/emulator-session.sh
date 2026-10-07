@@ -20,6 +20,23 @@ adb -s "$SERIAL" shell settings put global window_animation_scale 0 || true
 adb -s "$SERIAL" shell settings put global transition_animation_scale 0 || true
 adb -s "$SERIAL" shell settings put global animator_duration_scale 0 || true
 
+# --- Viewer #0: webscreen — WebRTC, the lowest-latency transport we have.
+# WebRTC does its own NAT traversal, runs on UDP, and renders frames as they
+# arrive instead of buffering them for smoothness (that buffer alone is worth
+# ~90ms at p50). Single static binary; see TUNNEL.md. ---
+WS_PIN="${WEBSCREEN_PIN:-123456}"
+if [ ! -x /tmp/webscreen ]; then
+  curl -fsSL -o /tmp/webscreen \
+    https://github.com/huonwe/webscreen/releases/latest/download/webscreen-linux-amd64 \
+    && chmod +x /tmp/webscreen || echo "::warning::could not download webscreen"
+fi
+if [ -x /tmp/webscreen ]; then
+  nohup /tmp/webscreen -host 0.0.0.0 -port 8079 -pin "$WS_PIN" >/tmp/webscreen.log 2>&1 &
+  sleep 5
+  echo "--- webscreen ---"; tail -10 /tmp/webscreen.log || true
+  echo "::notice::webscreen (WebRTC) ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:8079  PIN ${WS_PIN}"
+fi
+
 # --- Viewer #1: stream-droid, scrcpy backend. scrcpy encodes H.264 on the
 # device and streams it natively; the browser decodes via WebCodecs/MSE.
 # (scrcpy 5.0 also hardware-decodes, so the server side is cheap.) ---
