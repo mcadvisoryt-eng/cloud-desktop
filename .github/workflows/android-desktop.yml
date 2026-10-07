@@ -279,6 +279,8 @@ jobs:
           # that (see MOBILE.md).
           echo "--- tailscale status ---"
           tailscale status | head -5 || true
+          echo "--- tailscale netcheck (direct vs DERP — see TUNNEL.md) ---"
+          tailscale netcheck 2>/dev/null | head -25 || true
           echo "::notice::Android ready at ${TS_IP} — browser http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/ , noVNC :6080/vnc.html , raw VNC :5900"
 
       - name: Install the browser viewer (stream-droid, scrcpy capture)

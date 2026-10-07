@@ -10,6 +10,7 @@ in the cloud).
 | **Linux on GitHub Actions** | Ephemeral Ubuntu runner | ~180–250 ms | free (public repo) | `TUNING.md` |
 | **Windows on GitHub Actions** | Ephemeral Windows runner | ~180–250 ms | free (public repo) | `WINDOWS.md` |
 | **Android on GitHub Actions** | redroid container (full Android) | ~180–250 ms | free (public repo) | `MOBILE.md` |
+| **Android (emulator)** | Official AVD on a KVM-accelerated runner | ~180–250 ms | free (public repo) | `TUNNEL.md` |
 | **Cloud VM in India** ⭐ | Your own VM in an Indian region | **~5–30 ms** | free tier or ~$5–25/mo | `CLOUD-VM.md` |
 
 > **Latency, honestly.** 0–10 ms is a LAN number. GitHub's runners live in Azure
@@ -33,6 +34,8 @@ in the cloud).
   desktop.yml            Linux desktop on a GitHub runner
   windows-desktop.yml    Windows desktop on a GitHub runner
   android-desktop.yml    Full Android (redroid) on a GitHub runner
+  android-emulator.yml   Full Android (official emulator, KVM-accelerated)
+  maintenance.yml        Tailnet housekeeping: list/clean devices, probe KVM
 scripts/
   run-session.sh         Linux session loop (health check, snapshot, pre-queue)
   snapshot.sh            Linux encrypted backup (idle-priority rclone)
@@ -43,7 +46,11 @@ scripts/
   provision-cloudvm.sh   Provision an Ubuntu VM as the desktop (Indian region)
   set-secrets.sh         Set the Actions secrets safely via the gh CLI
   android-snapshot.sh    Android (redroid) encrypted backup
+  android-restore.sh     Scoped, time-capped Android restore
+  android-excludes.txt   Caches/dalvik/oat kept out of backup + restore
+  emulator-session.sh    Emulator session loop + viewers
 TUNING.md   Linux/Actions latency tuning notes
+TUNNEL.md   The transport: Tailscale direct vs DERP, Cloudflare's video ban, WebRTC
 WINDOWS.md  Windows variant + the full latency picture
 MOBILE.md   Full Android (redroid) on a runner, viewed in a phone browser
 CLOUD-VM.md Indian-region VM (the low-latency path)

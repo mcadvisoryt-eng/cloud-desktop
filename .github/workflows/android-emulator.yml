@@ -1,0 +1,118 @@
+name: android-emulator
+
+# The OTHER Android variant: the official Android Emulator, hardware-accelerated
+# with KVM, on a free ubuntu-latest runner.
+#
+# Why this exists: a probe (see the `kvm` action in maintenance.yml) proved that
+# /dev/kvm IS present on the standard runner — Intel VT-x, kvm_intel loaded,
+# nested=Y — despite the docs saying KVM is a larger-runner feature. So the real
+# emulator, which needs hardware virtualisation, can run here.
+#
+# Versus redroid: the emulator is CPU-accelerated (KVM) and can use a
+# `google_apis_playstore` image, giving a properly-certified Play Store instead
+# of bolted-on GApps. Its weakness is graphics: GitHub runners have no GPU, so
+# it renders in software, and the emulator's software H.264 encoder sustains
+# 60 fps only below ~1 megapixel — hence the small 540x960 default.
+#
+# See TUNNEL.md for the transport story, and MOBILE.md for the redroid variant.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:30 IST (23:00 UTC) daily safety-net.
+    - cron: '0 23 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-emulator
+  cancel-in-progress: false
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      TS_HOSTNAME: 'cloudpc-emu'
+      SESSION_MINUTES: '330'
+      API_LEVEL: '34'
+      GH_TOKEN: ${{ secrets.RESTART_PAT }}
+      GH_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          set -x
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || echo "::warning::no /dev/kvm — the emulator will be painfully slow on this host"
+          grep -m1 -oE 'vmx|svm' /proc/cpuinfo || true
+
+      - name: Install packages
+        run: |
+          set -x
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq adb xvfb x11vnc scrcpy novnc websockify jq curl || \
+            echo "::warning::some packages failed to install"
+          echo "--- tools present? (MISSING means the install failed) ---"
+          for b in adb Xvfb x11vnc scrcpy websockify jq; do command -v "$b" || echo "MISSING: $b"; done
+
+      - name: Claim the hostname (drop any older node with this name)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TS_API_KEY:-}" ]; then
+            echo "::warning::TS_API_KEY not set — name may get a -1 suffix"
+            exit 0
+          fi
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json || exit 0
+          for id in $(jq -r --arg p "$TS_HOSTNAME" '.devices[] | select(.name | startswith($p)) | .id' /tmp/devices.json); do
+            echo "removing older node $id so $TS_HOSTNAME is free"
+            curl -fsS -X DELETE -H "Authorization: Bearer $TS_API_KEY" \
+              "https://api.tailscale.com/api/v2/device/$id" || echo "::warning::could not remove $id"
+          done
+
+      - name: Bring up Tailscale
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TS_AUTHKEY" ]; then
+            echo "::warning::TS_AUTHKEY not set — emulator unreachable via tailnet"
+            exit 0
+          fi
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" --accept-routes
+          echo "::notice::emulator will be at http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/ once booted"
+
+      - name: Boot the emulator and serve it
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ env.API_LEVEL }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_5
+          # -no-window: headless (scrcpy captures the framebuffer over adb anyway)
+          # -gpu swiftshader_indirect: software rendering — there is no GPU here
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: |
+            bash "$GITHUB_WORKSPACE/scripts/emulator-session.sh"
+
+      - name: Trigger next session (fallback if the session did not pre-queue one)
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then echo "No RESTART_PAT — chain stops here."; exit 0; fi
+          queued=$(gh run list --workflow=android-emulator.yml --status queued --json databaseId --jq 'length' || echo 0)
+          if [ "$queued" -gt 0 ]; then
+            echo "A run is already queued — not adding another."
+            exit 0
+          fi
+          gh workflow run android-emulator.yml --repo "$GITHUB_REPOSITORY"
+          echo "Next session queued."
