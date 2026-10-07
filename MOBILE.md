@@ -60,6 +60,48 @@ the browser). No Xvfb/scrcpy/x11vnc/websockify to go wrong, so start here.
 - **`:5900` — raw VNC**: for a native VNC app (RealVNC Viewer, bVNC) — the
   closest thing to the Windows App for RDP.
 
+### 4b. Full setup — browser *and* MultiVNC (native app)
+
+**Browser, option 1 — serve-avd (simplest; try this first)**
+1. Tailscale on.
+2. Chrome → `http://cloudpc-android.<your-tailnet>.ts.net:3200/`
+3. The Android screen appears. Tap and type directly.
+
+**Browser, option 2 — noVNC (fallback)**
+1. Chrome → `http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html`
+2. If it prompts, click **Connect**. There is no password.
+
+**MultiVNC — native Android app (closest thing to the Windows App)**
+
+Install **MultiVNC** (open source — get it from **F-Droid**, or the Play Store),
+then:
+1. Tailscale on.
+2. Open MultiVNC → **+** to add a connection.
+3. Fill in:
+
+   | Field | Value |
+   |---|---|
+   | Nickname | `cloudpc-android` |
+   | Address | `cloudpc-android.<your-tailnet>.ts.net` |
+   | Port | `5900` |
+   | Password | *(leave blank — none is set)* |
+
+4. **Save**, then tap the entry to connect.
+5. You land on the Android screen.
+
+MultiVNC settings worth switching on:
+- **Scaling**: fit to screen.
+- **Input mode**: direct touch (not touchpad), so taps land where you press.
+- **Force fullscreen / immersive mode**.
+- **Reconnect automatically**.
+
+Caveats for the VNC path (MultiVNC *and* noVNC):
+- VNC carries a single pointer, so **multi-touch and pinch-zoom do not work** —
+  one finger at a time.
+- Both depend on the `scrcpy → Xvfb → x11vnc` chain being up, so if noVNC is
+  black, MultiVNC will be too. **serve-avd (`:3200`) is the independent one** —
+  it doesn't use that chain at all.
+
 ### 5. Sign in to Google
 Open the Play Store and sign in with your Google account.
 
