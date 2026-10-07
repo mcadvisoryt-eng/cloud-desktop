@@ -117,6 +117,18 @@ on your encrypted remote:
 
 Set the `RCLONE_CONFIG` secret and it just works (see `RCLONE.md`).
 
+**A backup never takes the session down.** If a backup or a restore does not
+complete, the workflow:
+
+1. **retries once**, then
+2. writes the rclone output to a log and **uploads it to `crypt1:logs/`**
+   (`android-backup-<stamp>.log`, or `android-restore-<stamp>.log`), and
+3. **carries on** — the session keeps running (or starts) *without* the backup
+   rather than dying.
+
+So a flaky transfer costs you one snapshot, not the desktop. You can read those
+failure logs from your Drive any time, under `cloud-desktop/logs/`.
+
 Caveat: the backup is taken from a *running* Android, so it's crash-consistent
 at best — treat the last few minutes as unreliable. The 30-minute cadence is
 your safety net.

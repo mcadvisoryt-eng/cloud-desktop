@@ -1,42 +1,72 @@
 #!/usr/bin/env bash
-# Mirrors the Android data dir to the encrypted rclone remote so your apps and
-# data survive across sessions. Runs rclone via sudo because redroid's /data is
-# owned by uid 1000 inside the container.
+# Mirrors the Android data dir to the encrypted rclone remote so apps and data
+# survive across sessions.
 #
-# Note: this backs up a *running* Android, so it is a crash-consistent copy at
-# best — Android is always writing. That is fine for a backup you restore onto
-# a fresh container, but treat the newest few minutes as unreliable.
+# Resilience rules (deliberate):
+#   * A backup that does not complete must NEVER block the session.
+#   * If it fails, we retry once, then write a log, upload that log to
+#     <remote>:logs/ so you can read it later, and exit 0.
+#   * Pruning old trash is best-effort and never fatal either.
+#
+# Runs rclone via sudo because redroid's /data is owned by uid 1000.
 set -uo pipefail
 
 REMOTE="${REMOTE:-crypt1:android}"
 TRASH_REMOTE="${TRASH_REMOTE:-crypt1:trash}"
+LOG_REMOTE="${LOG_REMOTE:-crypt1:logs}"
 DATA_DIR="${DATA_DIR:-/var/redroid-data}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
+LOG="/tmp/android-backup-${STAMP}.log"
 
 export RCLONE_CONFIG="${HOME}/.config/rclone/rclone.conf"
 
+log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
+
+# rclone, low CPU / idle I/O so a backup never makes the phone stutter.
+rc() { sudo nice -n 19 ionice -c3 env RCLONE_CONFIG="$RCLONE_CONFIG" rclone "$@"; }
+
+upload_log() {
+  rc copyto "$LOG" "${LOG_REMOTE}/android-backup-${STAMP}.log" >/dev/null 2>&1 \
+    || echo "::warning::could not upload the backup log to ${LOG_REMOTE}"
+}
+
 if [ ! -f "$RCLONE_CONFIG" ]; then
-  echo "::warning:: no rclone.conf found; skipping Android backup"
+  log "no rclone.conf found; skipping Android backup"
   exit 0
 fi
 
 if [ ! -d "$DATA_DIR" ]; then
-  echo "::warning:: $DATA_DIR does not exist; skipping Android backup"
+  log "$DATA_DIR does not exist; skipping Android backup"
   exit 0
 fi
 
-echo "Backing up $DATA_DIR -> ${REMOTE} (trash: ${TRASH_REMOTE}/${STAMP})"
+log "Backing up $DATA_DIR -> ${REMOTE} (trash: ${TRASH_REMOTE}/${STAMP})"
 
-# Low CPU / idle I/O priority so the backup doesn't make the phone stutter.
-sudo nice -n 19 ionice -c3 env RCLONE_CONFIG="$RCLONE_CONFIG" rclone sync "$DATA_DIR" "$REMOTE/" \
-  --backup-dir "${TRASH_REMOTE}/${STAMP}" \
-  --transfers 8 --checkers 4 --fast-list \
-  --stats 30s --stats-one-line \
-  --exclude '**/*.sock' \
-  --exclude '**/lost+found/**'
+attempt=1
+max_attempts=2
+while :; do
+  log "attempt ${attempt}/${max_attempts}"
+  if rc sync "$DATA_DIR" "$REMOTE/" \
+        --backup-dir "${TRASH_REMOTE}/${STAMP}" \
+        --transfers 8 --checkers 4 --fast-list \
+        --stats 30s --stats-one-line \
+        --exclude '**/*.sock' \
+        --exclude '**/lost+found/**' >>"$LOG" 2>&1; then
+    log "Backup complete."
+    # Prune trash older than 7 days (best-effort).
+    rc delete --min-age 7d "$TRASH_REMOTE" >>"$LOG" 2>&1 || true
+    rc rmdirs "$TRASH_REMOTE" --leave-root >>"$LOG" 2>&1 || true
+    exit 0
+  fi
 
-# Prune trash older than 7 days.
-sudo nice -n 19 ionice -c3 env RCLONE_CONFIG="$RCLONE_CONFIG" rclone delete --min-age 7d "$TRASH_REMOTE" 2>/dev/null || true
-sudo nice -n 19 ionice -c3 env RCLONE_CONFIG="$RCLONE_CONFIG" rclone rmdirs "$TRASH_REMOTE" --leave-root 2>/dev/null || true
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    log "backup FAILED after ${attempt} attempts"
+    log "uploading this log to ${LOG_REMOTE}/android-backup-${STAMP}.log and continuing WITHOUT blocking the session"
+    upload_log
+    echo "::warning::Android backup did not complete; log saved to ${LOG_REMOTE}/android-backup-${STAMP}.log — session continues"
+    exit 0
+  fi
 
-echo "Android backup complete."
+  attempt=$((attempt + 1))
+  sleep 20
+done
