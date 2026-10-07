@@ -56,10 +56,10 @@ jobs:
         run: |
           set -x
           sudo apt-get update -qq
-          sudo apt-get install -y -qq adb xvfb x11vnc scrcpy novnc websockify jq curl || \
+          sudo apt-get install -y -qq adb xvfb scrcpy novnc websockify tigervnc-standalone-server tigervnc-common jq curl || \
             echo "::warning::some packages failed to install"
           echo "--- tools present? (MISSING means the install failed) ---"
-          for b in adb Xvfb x11vnc scrcpy websockify jq; do command -v "$b" || echo "MISSING: $b"; done
+          for b in adb Xvnc scrcpy websockify jq; do command -v "$b" || echo "MISSING: $b"; done
 
       - name: Claim the hostname (drop any older node with this name)
         env:

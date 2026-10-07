@@ -45,17 +45,21 @@ sleep 15
 echo "--- stream-droid ---"; tail -20 /tmp/stream-droid.log || true
 echo "::notice::stream-droid viewer: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
 
-# --- Viewer #2: scrcpy -> Xvfb -> x11vnc -> noVNC (and raw VNC on 5900) ---
+# --- Viewer #2: scrcpy -> Xvnc (TigerVNC) -> websockify -> noVNC.
+# Xvnc is ONE process that is both the X server and the VNC server, so there is
+# no Xvfb + x11vnc pair to fall out of sync — which is what left a black
+# screen on the previous setup. ---
 export DISPLAY=:99
-Xvfb :99 -screen 0 540x960x24 >/tmp/xvfb.log 2>&1 &
-sleep 2
+Xvnc :99 -geometry 540x960 -depth 24 -SecurityTypes None -rfbport 5900 \
+     -AlwaysShared -localhost no >/tmp/xvnc.log 2>&1 &
+sleep 3
+# Make sure adb still has the device before scrcpy tries to attach to it.
+if [[ "$SERIAL" == *:* ]]; then adb connect "$SERIAL" >/dev/null 2>&1 || true; fi
 scrcpy -s "$SERIAL" --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
 sleep 5
-x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -listen 0.0.0.0 >/tmp/x11vnc.log 2>&1 &
-sleep 2
 websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
 sleep 2
-for f in xvfb scrcpy x11vnc websockify; do echo "--- $f ---"; tail -5 "/tmp/$f.log" || true; done
+for f in xvnc scrcpy websockify; do echo "--- $f ---"; tail -15 "/tmp/$f.log" || true; done
 echo "::notice::noVNC viewer: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html (raw VNC :5900)"
 
 # --- Path check: is Tailscale direct or relaying via DERP? A DERP path costs

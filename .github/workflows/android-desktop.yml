@@ -73,11 +73,11 @@ jobs:
           sudo apt-get install -y -qq \
             "linux-modules-extra-$(uname -r)" \
             adb rclone git python3-venv python3-pip \
-            xvfb x11vnc scrcpy novnc websockify \
+            xvfb x11vnc scrcpy novnc websockify tigervnc-standalone-server tigervnc-common \
             || echo "::warning::some packages failed to install"
           cp -a /var/cache/apt/archives/*.deb apt-archives/ 2>/dev/null || true
           echo "--- tools present? (MISSING means the install failed) ---"
-          for b in adb rclone Xvfb x11vnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
+          for b in adb rclone Xvnc scrcpy websockify; do command -v "$b" || echo "MISSING: $b"; done
           test -d /usr/share/novnc && echo "novnc web root: OK" || echo "MISSING: /usr/share/novnc"
 
       - name: Guard — cancel this run if another session is already active
@@ -322,19 +322,20 @@ jobs:
           echo "--- stream-droid ---"; tail -20 /tmp/stream-droid.log || true
           echo "::notice::stream-droid viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
 
-          # --- Viewer #2: scrcpy renders Android into a virtual X display,
-          # x11vnc serves that display, websockify+noVNC put it in the browser,
-          # and x11vnc is also reachable directly on 5900 for a native VNC app. ---
+          # --- Viewer #2: scrcpy -> Xvnc (TigerVNC) -> websockify -> noVNC.
+          # Xvnc is ONE process that is both the X server and the VNC server, so
+          # there is no Xvfb + x11vnc pair to fall out of sync (which is what
+          # left a black screen before). ---
           export DISPLAY=:99
-          Xvfb :99 -screen 0 540x960x24 >/tmp/xvfb.log 2>&1 &
-          sleep 2
+          Xvnc :99 -geometry 540x960 -depth 24 -SecurityTypes None -rfbport 5900 \
+               -AlwaysShared -localhost no >/tmp/xvnc.log 2>&1 &
+          sleep 3
+          adb connect localhost:5555 >/dev/null 2>&1 || true
           scrcpy -s localhost:5555 --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
           sleep 5
-          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -listen 0.0.0.0 >/tmp/x11vnc.log 2>&1 &
-          sleep 2
           websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
           sleep 2
-          for f in xvfb scrcpy x11vnc websockify; do echo "--- $f ---"; tail -5 "/tmp/$f.log" || true; done
+          for f in xvnc scrcpy websockify; do echo "--- $f ---"; tail -15 "/tmp/$f.log" || true; done
           echo "::notice::noVNC viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:6080/vnc.html (raw VNC on :5900)"
 
           start=$(date +%s); last_snap=$start; prequeued=0
