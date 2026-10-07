@@ -13,7 +13,7 @@ name: android-desktop
 # host.
 #
 # Viewers (three run at once so if one fails the next may not):
-#   :3200  serve-avd  — single tool, adb screenrecord -> WebCodecs (try first)
+#   :3200  stream-droid — scrcpy backend, high-fps H.264 via WebCodecs/MSE (try first)
 #   :6080  noVNC      — VNC in the browser via scrcpy -> Xvfb -> x11vnc
 #   :5900  raw VNC    — for a native VNC app (RealVNC Viewer, bVNC)
 #
@@ -166,7 +166,7 @@ jobs:
             androidboot.redroid_width=540 \
             androidboot.redroid_height=960 \
             androidboot.redroid_dpi=240 \
-            androidboot.redroid_fps=30 \
+            androidboot.redroid_fps=60 \
             androidboot.redroid_gpu_mode=guest \
             androidboot.use_memfd=true \
             ro.setupwizard.mode=DISABLED \
@@ -279,15 +279,15 @@ jobs:
           # that (see MOBILE.md).
           echo "--- tailscale status ---"
           tailscale status | head -5 || true
-          echo "::notice::Android ready at ${TS_IP} — serve-avd http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/ , noVNC :6080/vnc.html , raw VNC :5900"
+          echo "::notice::Android ready at ${TS_IP} — browser http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/ , noVNC :6080/vnc.html , raw VNC :5900"
 
-      - name: Install the serve-avd viewer (adb screenrecord -> WebCodecs)
+      - name: Install the browser viewer (stream-droid, scrcpy capture)
         run: |
           set -x
-          # Single-tool browser viewer: captures with `adb screenrecord` and
-          # streams H.264 to the browser over WebCodecs. No Xvfb/scrcpy/x11vnc/
-          # websockify — far fewer pieces to fail. Try :3200 first.
-          npx -y serve-avd --help >/dev/null 2>&1 || echo "::warning::could not pre-fetch serve-avd"
+          # stream-droid drives scrcpy-server (native H.264, high fps) and renders
+          # it in the browser via MSE/WebCodecs — no MJPEG screenshot fallback,
+          # which is what capped the old serve-avd viewer at ~3 fps.
+          npx -y stream-droid --help >/dev/null 2>&1 || echo "::warning::could not pre-fetch stream-droid"
 
       - name: Serve Android + run session
         env:
@@ -295,11 +295,13 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           set -x
-          # --- Viewer #1: serve-avd (simplest; try this one first) ---
-          nohup npx -y serve-avd localhost:5555 --host 0.0.0.0 --port 3200 >/tmp/serve-avd.log 2>&1 &
-          sleep 10
-          echo "--- serve-avd ---"; tail -15 /tmp/serve-avd.log || true
-          echo "::notice::serve-avd viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
+          # --- Viewer #1: stream-droid with the scrcpy backend. scrcpy does the
+          # H.264 encoding on the device and streams it natively, so this is the
+          # high-frame-rate path (unlike serve-avd's screenrecord/MJPEG). ---
+          nohup npx -y stream-droid localhost:5555 --capture scrcpy --headless --port 3200 >/tmp/stream-droid.log 2>&1 &
+          sleep 15
+          echo "--- stream-droid ---"; tail -20 /tmp/stream-droid.log || true
+          echo "::notice::stream-droid viewer ready: http://${TS_HOSTNAME}.<your-tailnet>.ts.net:3200/"
 
           # --- Viewer #2: scrcpy renders Android into a virtual X display,
           # x11vnc serves that display, websockify+noVNC put it in the browser,

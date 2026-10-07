@@ -50,12 +50,15 @@ device appears.
 
 Three viewers run at once, so if one fails the next may not:
 ```
-http://cloudpc-android.<your-tailnet>.ts.net:3200/          serve-avd  (try first)
+http://cloudpc-android.<your-tailnet>.ts.net:3200/          stream-droid (scrcpy)  (try first)
 http://cloudpc-android.<your-tailnet>.ts.net:6080/vnc.html  noVNC
 cloudpc-android.<your-tailnet>.ts.net:5900                  raw VNC (native app)
 ```
-- **`:3200` — serve-avd**: the simplest chain (`adb screenrecord` → WebCodecs in
-the browser). No Xvfb/scrcpy/x11vnc/websockify to go wrong, so start here.
+- **`:3200` — stream-droid, scrcpy backend**: scrcpy encodes H.264 **on the
+device** and streams it natively, decoded via WebCodecs/MSE. This is the
+high-frame-rate path. (The previous `serve-avd` viewer captured with
+`adb screenrecord` and silently fell back to **MJPEG screenshot polling** when
+H.264 wasn't available — that is what made it ~3 fps with ~1 s of lag.)
 - **`:6080` — noVNC**: VNC in the browser, backed by scrcpy → Xvfb → x11vnc.
 - **`:5900` — raw VNC**: for a native VNC app (RealVNC Viewer, bVNC) — the
   closest thing to the Windows App for RDP.
@@ -240,7 +243,7 @@ real low latency, run redroid on the Indian-region VM (`CLOUD-VM.md`).
 | What | Where |
 |---|---|
 | Screen size | `androidboot.redroid_width/height/dpi` in the "Start Android" step (default 540×960 @ 240, lowered for latency) |
-| Frame rate | `androidboot.redroid_fps` (default 30) |
+| Frame rate | `androidboot.redroid_fps` (default 60; lower it if the encoder can't keep up) |
 | Android version | `ANDROID_VERSION` (default `13.0.0`) |
 | Google Play package | `-lg` (LiteGapps, x86_64). `-mtg` MindTheGapps is arm64 and crashes here; `-g` OpenGApps is Android 11 only |
 | ARM app translation | `-i` (houdini) — remove if it causes trouble |
