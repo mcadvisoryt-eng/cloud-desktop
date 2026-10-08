@@ -235,6 +235,29 @@ than anything else**. In the device row:
 3. Use **`Configure stream`** to lower `max size` (e.g. 540) and set a modest
    bitrate — less to encode, less to send, less lag.
 
+### Dialling in the stream
+
+These are workflow **env vars** — change them in the workflow file and the
+viewers pick them up on the next run. Fewer pixels = more frames; bit-rate
+trades quality for smoothness.
+
+| Env var | Default | What it does |
+|---|---|---|
+| `STREAM_DROID_MAX_SIZE` | `540` | downscale so the longer edge ≤ px (stream-droid) |
+| `STREAM_DROID_BIT_RATE` | `4M` | encoder bit-rate (`4M`, `800K`, `4000000`) |
+| `SCRCPY_MAX_SIZE` | `540` | same, for the scrcpy → Xvnc → noVNC path |
+| `SCRCPY_BITRATE` | `4M` | scrcpy `--video-bit-rate` |
+| `SCRCPY_MAX_FPS` | `30` | scrcpy `--max-fps` |
+
+Starting points when it feels heavy:
+- **Laggy / low fps** → `STREAM_DROID_MAX_SIZE: '400'`, `STREAM_DROID_BIT_RATE: '2M'`
+- **Too blurry** → raise `BIT_RATE` to `6M`–`8M` *before* raising the size
+- **Device-side ceiling** → redroid's `androidboot.redroid_fps` (currently 60)
+
+Note: **webscreen (WebRTC) has almost no tuning surface** — it uses its own
+encoder defaults, which is part of why it can feel less responsive than
+stream-droid even though the transport underneath is better.
+
 ### Honest floor
 
 Even fully tuned, this is not as snappy as the Windows/RDP desktop: RDP is a

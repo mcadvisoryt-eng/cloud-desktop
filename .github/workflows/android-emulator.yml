@@ -38,6 +38,12 @@ jobs:
       SESSION_MINUTES: '330'
       API_LEVEL: '34'
       WEBSCREEN_PIN: '123456'          # 6-digit PIN for the webscreen WebRTC viewer
+      # --- viewer tuning knobs (see MOBILE.md -> "Dialling in the stream") ---
+      STREAM_DROID_MAX_SIZE: '540'
+      STREAM_DROID_BIT_RATE: '4M'
+      SCRCPY_MAX_SIZE: '540'
+      SCRCPY_BITRATE: '4M'
+      SCRCPY_MAX_FPS: '30'
       GH_TOKEN: ${{ secrets.RESTART_PAT }}
       GH_REPOSITORY: ${{ github.repository }}
     steps:

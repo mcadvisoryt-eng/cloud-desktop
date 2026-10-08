@@ -49,6 +49,15 @@ jobs:
       DATA_DIR: '/var/redroid-data'
       DEBIAN_FRONTEND: 'noninteractive'
       WEBSCREEN_PIN: '123456'          # 6-digit PIN for the webscreen WebRTC viewer
+      # --- viewer tuning knobs (see MOBILE.md -> "Dialling in the stream") ---
+      # Lower MAX_SIZE = fewer pixels to encode = more frames. BIT_RATE is the
+      # quality/smoothness trade. stream-droid reads these directly.
+      STREAM_DROID_MAX_SIZE: '540'
+      STREAM_DROID_BIT_RATE: '4M'
+      # Same idea for the scrcpy -> Xvnc -> noVNC path.
+      SCRCPY_MAX_SIZE: '540'
+      SCRCPY_BITRATE: '4M'
+      SCRCPY_MAX_FPS: '30'
     steps:
       - uses: actions/checkout@v4
 
@@ -331,7 +340,9 @@ jobs:
                -AlwaysShared -localhost no >/tmp/xvnc.log 2>&1 &
           sleep 3
           adb connect localhost:5555 >/dev/null 2>&1 || true
-          scrcpy -s localhost:5555 --no-audio --max-size 540 --render-driver=software --window-title Android >/tmp/scrcpy.log 2>&1 &
+          scrcpy -s localhost:5555 --no-audio --max-size "${SCRCPY_MAX_SIZE:-540}" \
+                --video-bit-rate "${SCRCPY_BITRATE:-4M}" --max-fps "${SCRCPY_MAX_FPS:-30}" \
+                --render-driver=software --window-title Android >/tmp/scrcpy.log 2>&1 &
           sleep 5
           websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
           sleep 2
