@@ -111,9 +111,6 @@ jobs:
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CONFIG_DIRS=/etc/xdg
           xset s off -dpms 2>/dev/null || true
-          # Launch the Android emulator into this RDP session (background,
-          # optional — the script is created later and may not exist yet).
-          [ -x /home/pc/android-emu-launch.sh ] && /home/pc/android-emu-launch.sh &
           exec dbus-launch --exit-with-session startxfce4
           XSEOF
           sudo chmod +x /home/pc/.xsession
@@ -214,12 +211,26 @@ jobs:
           #!/bin/sh
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator"
-          sleep 6
+          sleep 3
           exec "$ANDROID_SDK_ROOT/emulator/emulator" -avd android \
             -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -skin 540x960
           EOF
           sudo chmod +x /home/pc/android-emu-launch.sh
           sudo chown pc:pc /home/pc/android-emu-launch.sh
+
+          # Launch it via XFCE's OWN autostart mechanism. Do NOT touch .xsession:
+          # injecting a background job there broke xfce4-session with
+          # "Unable to determine failsafe session name".
+          sudo mkdir -p /home/pc/.config/autostart
+          sudo tee /home/pc/.config/autostart/android-emu.desktop >/dev/null <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Android Emulator
+          Exec=/home/pc/android-emu-launch.sh
+          Terminal=false
+          X-GNOME-Autostart-enabled=true
+          EOF
+          sudo chown -R pc:pc /home/pc/.config/autostart
 
       - name: Bring up Tailscale
         env:
