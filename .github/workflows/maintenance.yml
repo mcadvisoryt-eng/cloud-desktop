@@ -78,6 +78,14 @@ jobs:
           sudo modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>/dev/null && echo "binder_linux OK" || echo "binder_linux failed"
           grep binder /proc/filesystems || true
 
+      - name: Install rclone (needed for the backup check)
+        if: ${{ github.event.inputs.action == 'backup' }}
+        run: |
+          set -x
+          sudo apt-get update -qq && sudo apt-get install -y -qq rclone \
+            || curl -fsSL https://rclone.org/install.sh | sudo bash
+          rclone version | head -1
+
       - name: Check backups (are the encrypted snapshots landing?)
         if: ${{ github.event.inputs.action == 'backup' }}
         env:
