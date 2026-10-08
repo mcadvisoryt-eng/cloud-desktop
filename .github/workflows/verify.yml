@@ -1,0 +1,145 @@
+name: verify
+
+# End-to-end verification that runs ON a runner (not in a sandbox), because a
+# runner can join the tailnet and actually reach the desktops.
+#
+# It: joins the tailnet, lists devices, tests TCP reachability, RDPs into the
+# Linux desktop and screenshots what comes back, attaches to the Android
+# emulator over adb and screenshots it, and checks backup freshness.
+#
+# Both screenshots are printed into the log as base64 (downscaled) so they can
+# be read without downloading artifacts.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 */2 * * *'   # every 2 hours
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TAILNET: tail996723.ts.net
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          set -x
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq adb jq curl netcat-openbsd \
+            xvfb x11-utils imagemagick freerdp2-x11 || \
+            echo "::warning::some tools failed to install"
+          for b in adb jq nc Xvfb import xfreerdp; do command -v "$b" || echo "MISSING: $b"; done
+
+      - name: Join the tailnet (temporary, ephemeral)
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TS_AUTHKEY:-}" ]; then echo "::warning::no TS_AUTHKEY"; exit 0; fi
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="cloudpc-verify" --accept-routes --accept-dns=false
+          tailscale status | head -10 || true
+
+      - name: Tailnet devices (API)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TS_API_KEY:-}" ]; then echo "no TS_API_KEY"; exit 0; fi
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json || exit 0
+          jq -r '.devices[] | [.name, (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
+            /tmp/devices.json | column -t -s $'\t' || true
+
+      - name: TCP reachability
+        run: |
+          set -x
+          for h in cloudpc cloudpc-win cloudpc-android; do
+            echo -n "${h}:3389 -> "
+            timeout 8 nc -zv "${h}.${TAILNET}" 3389 2>&1 | tail -1 || echo "unreachable"
+          done
+          echo -n "cloudpc:5555 (emulator adb) -> "
+          timeout 8 nc -zv "cloudpc.${TAILNET}" 5555 2>&1 | tail -1 || echo "unreachable"
+
+      - name: RDP into cloudpc and screenshot what comes back
+        env:
+          DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
+        run: |
+          set -x
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
+          sleep 3
+          timeout 60 xfreerdp /v:"cloudpc.${TAILNET}" /u:pc /p:"${DESKTOP_PASSWORD}" \
+            /cert:ignore /size:1280x800 /dynamic-resolution- /log-level:WARN >/tmp/rdp.log 2>&1 &
+          RDP_PID=$!
+          sleep 35
+          import -window root /tmp/rdp.png 2>/tmp/import.log || xwd -root -silent | convert xwd:- /tmp/rdp.png || echo "screenshot failed"
+          echo "--- rdp log ---"; tail -25 /tmp/rdp.log || true
+          if [ -f /tmp/rdp.png ]; then
+            echo "--- rdp screenshot (base64, downscaled) ---"
+            convert /tmp/rdp.png -resize 720x /tmp/rdp_small.png 2>/dev/null || cp /tmp/rdp.png /tmp/rdp_small.png
+            base64 -w0 /tmp/rdp_small.png; echo
+          else
+            echo "no rdp screenshot produced"
+          fi
+          kill $RDP_PID 2>/dev/null || true
+          exit 0
+
+      - name: Android emulator over adb + screenshot
+        run: |
+          set -x
+          adb start-server >/dev/null 2>&1 || true
+          adb connect "cloudpc.${TAILNET}:5555" || true
+          sleep 3
+          adb devices -l || true
+          SERIAL="cloudpc.${TAILNET}:5555"
+          echo "--- android version ---"
+          adb -s "$SERIAL" shell getprop ro.build.version.release 2>&1 | head -2 || true
+          echo "--- abilist ---"
+          adb -s "$SERIAL" shell getprop ro.product.cpu.abilist 2>&1 | head -2 || true
+          echo "--- Play Store present? ---"
+          adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -iE 'vending|gms' || echo "(no Play/GSF packages)"
+          echo "--- screenshot ---"
+          if adb -s "$SERIAL" exec-out screencap -p > /tmp/android.png 2>/tmp/scap.log; then
+            ls -l /tmp/android.png
+            convert /tmp/android.png -resize 720x /tmp/android_small.png 2>/dev/null || cp /tmp/android.png /tmp/android_small.png
+            echo "--- android screenshot (base64, downscaled) ---"
+            base64 -w0 /tmp/android_small.png; echo
+          else
+            echo "screencap failed:"; cat /tmp/scap.log || true
+          fi
+          exit 0
+
+      - name: Backup freshness
+        env:
+          RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          set -uo pipefail
+          if [ -z "${RCLONE_CONFIG_SECRET:-}" ]; then echo "no RCLONE_CONFIG"; exit 0; fi
+          sudo apt-get install -y -qq rclone >/dev/null 2>&1 || curl -fsSL https://rclone.org/install.sh | sudo bash
+          mkdir -p ~/.config/rclone && printf '%s' "$RCLONE_CONFIG_SECRET" > ~/.config/rclone/rclone.conf && chmod 600 ~/.config/rclone/rclone.conf
+          echo "--- newest backup stamps ---"
+          timeout 90 rclone lsf --max-depth 1 crypt1:trash 2>/dev/null | sort | tail -5 || true
+          echo "--- failure logs (only written on failure) ---"
+          timeout 90 rclone lsf --max-depth 1 crypt1:logs 2>/dev/null | sort | tail -8 || true
+          exit 0
+
+      - name: Upload screenshots as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-screenshots
+          path: |
+            /tmp/rdp.png
+            /tmp/android.png
+          if-no-files-found: warn
