@@ -340,9 +340,18 @@ jobs:
                -AlwaysShared -localhost no >/tmp/xvnc.log 2>&1 &
           sleep 3
           adb connect localhost:5555 >/dev/null 2>&1 || true
-          scrcpy -s localhost:5555 --no-audio --max-size "${SCRCPY_MAX_SIZE:-540}" \
-                --video-bit-rate "${SCRCPY_BITRATE:-4M}" --max-fps "${SCRCPY_MAX_FPS:-30}" \
-                --render-driver=software --window-title Android >/tmp/scrcpy.log 2>&1 &
+          # scrcpy's flags differ by version: apt ships 1.25, which has NO
+          # --no-audio and NO --render-driver (both arrived in 2.0). Passing them
+          # makes scrcpy exit instantly and the VNC display stays black. So probe
+          # --help and only pass what this build understands.
+          SCRCPY_HELP="$(scrcpy --help 2>&1 || true)"
+          SCRCPY_EXTRA=""
+          echo "$SCRCPY_HELP" | grep -q -- '--no-audio'      && SCRCPY_EXTRA="$SCRCPY_EXTRA --no-audio"
+          echo "$SCRCPY_HELP" | grep -q -- '--render-driver' && SCRCPY_EXTRA="$SCRCPY_EXTRA --render-driver=software"
+          echo "$SCRCPY_HELP" | grep -q -- '--max-fps'       && SCRCPY_EXTRA="$SCRCPY_EXTRA --max-fps ${SCRCPY_MAX_FPS:-30}"
+          echo "scrcpy $(scrcpy --version 2>&1 | head -1) — extra flags:${SCRCPY_EXTRA:-none}"
+          scrcpy -s localhost:5555 --max-size "${SCRCPY_MAX_SIZE:-540}" -b "${SCRCPY_BITRATE:-4M}" \
+                $SCRCPY_EXTRA --window-title Android >/tmp/scrcpy.log 2>&1 &
           sleep 5
           websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
           sleep 2
