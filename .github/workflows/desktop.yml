@@ -78,6 +78,14 @@ jobs:
           restore-keys: |
             apt-${{ runner.os }}-
 
+      - name: Enable KVM (the Android emulator needs it)
+        run: |
+          set -x
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || echo "::warning::no /dev/kvm — the emulator will be painfully slow"
+
       - name: Create desktop user + session
         env:
           DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
@@ -103,6 +111,9 @@ jobs:
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CONFIG_DIRS=/etc/xdg
           xset s off -dpms 2>/dev/null || true
+          # Launch the Android emulator into this RDP session (background,
+          # optional — the script is created later and may not exist yet).
+          [ -x /home/pc/android-emu-launch.sh ] && /home/pc/android-emu-launch.sh &
           exec dbus-launch --exit-with-session startxfce4
           XSEOF
           sudo chmod +x /home/pc/.xsession
@@ -176,6 +187,39 @@ jobs:
 
           # --- 3. Wait for the package install to finish -------------------
           wait "$APT_PID"
+
+      - name: Install the Android emulator + create an AVD
+        run: |
+          set -x
+          # Runs inside the XFCE session (see .xsession) so it shows up over RDP —
+          # the one transport that has been reliably smooth. KVM was enabled
+          # above; without it this image is unusable, hence the x86_64 build.
+          sudo apt-get install -y -qq openjdk-17-jdk-headless unzip >/dev/null || true
+          sudo -u pc bash -c '
+            set -e
+            mkdir -p "$HOME/android-sdk/cmdline-tools"
+            cd "$HOME/android-sdk"
+            curl -fsSL -o cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q -o cmdline.zip -d cmdline-tools
+            rm -rf cmdline-tools/latest
+            mv cmdline-tools/cmdline-tools cmdline-tools/latest
+            export ANDROID_SDK_ROOT="$HOME/android-sdk"
+            export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools"
+            yes | sdkmanager --licenses >/dev/null 2>&1 || true
+            sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64" >/dev/null
+            echo no | avdmanager create avd -n android -k "system-images;android-34;google_apis;x86_64" --device pixel_5 --force || true
+          ' || echo "::warning::Android emulator setup failed — the desktop still works"
+
+          sudo tee /home/pc/android-emu-launch.sh >/dev/null <<'EOF'
+          #!/bin/sh
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator"
+          sleep 6
+          exec "$ANDROID_SDK_ROOT/emulator/emulator" -avd android \
+            -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot -skin 540x960
+          EOF
+          sudo chmod +x /home/pc/android-emu-launch.sh
+          sudo chown pc:pc /home/pc/android-emu-launch.sh
 
       - name: Bring up Tailscale
         env:
