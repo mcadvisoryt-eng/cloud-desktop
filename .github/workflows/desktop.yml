@@ -255,8 +255,8 @@ jobs:
             export ANDROID_SDK_ROOT="$HOME/android-sdk"
             export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools"
             yes | sdkmanager --licenses >/dev/null 2>&1 || true
-            sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64" >/dev/null
-            echo no | avdmanager create avd -n android -k "system-images;android-34;google_apis;x86_64" --device pixel_5 --force || true
+            sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis_playstore;x86_64" >/dev/null
+            echo no | avdmanager create avd -n android -k "system-images;android-34;google_apis_playstore;x86_64" --device pixel_5 --force || true
           ' || echo "::warning::Android emulator setup failed — the desktop still works"
 
           sudo tee /home/pc/android-emu-launch.sh >/dev/null <<'EOF'
