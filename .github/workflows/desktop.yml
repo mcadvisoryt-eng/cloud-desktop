@@ -22,6 +22,11 @@ name: cloud-desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: 'Session length in minutes (set 2 for a quick diagnostic run)'
+        required: false
+        default: '330'
   schedule:
     # 04:00 IST (22:30 UTC) daily safety-net. If the PAT chain ever breaks,
     # this re-starts it.
@@ -40,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 345   # comfortably under GitHub's 6h (360m) hard cap
     env:
-      SESSION_MINUTES: '330'
+      SESSION_MINUTES: ${{ github.event.inputs.session_minutes || '330' }}
       SNAPSHOT_EVERY_MIN: '30'
       REMOTE: 'crypt1:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
       TRASH_REMOTE: 'crypt1:trash'   # 7-day recoverable deletions
@@ -327,6 +332,25 @@ jobs:
             '</channel>' \
             | sudo -u pc tee /home/pc/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml >/dev/null
           echo "xrdp + XFCE tuned for lowest latency."
+
+      - name: Session sanity check (diagnose the xfce4-session failure)
+        run: |
+          set -x
+          echo "--- session binaries ---"
+          for b in dbus-launch startxfce4 xfce4-session xfwm4 xfconfd xfce4-panel xfdesktop xrdp; do
+            printf '%-16s %s\n' "$b" "$(command -v "$b" || echo MISSING)"
+          done
+          echo "--- packages ---"
+          dpkg -l 2>/dev/null | grep -E 'xfce4-session|xfconf|xfwm4|dbus-x11|xorgxrdp|xrdp' | awk '{print $2, $3}' || true
+          echo "--- /etc/xdg/xfce4 ---"
+          ls -1 /etc/xdg/xfce4 2>/dev/null | head || echo "MISSING /etc/xdg/xfce4"
+          echo "--- ~/.xsession ---"
+          cat /home/pc/.xsession || true
+          echo "--- dbus-launch smoke test as pc ---"
+          sudo -u pc dbus-launch --sh-syntax 2>&1 | head -3 || true
+          echo "--- startwm.sh session handling ---"
+          grep -nE 'xsession|Xsession|startxfce|xfce' /etc/xrdp/startwm.sh 2>/dev/null || echo "(no matches)"
+          exit 0
 
       - name: Start xrdp + run session
         env:
