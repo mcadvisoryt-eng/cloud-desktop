@@ -55,7 +55,7 @@ Xvnc :99 -geometry 540x960 -depth 24 -SecurityTypes None -rfbport 5900 \
 sleep 3
 # Make sure adb still has the device before scrcpy tries to attach to it.
 if [[ "$SERIAL" == *:* ]]; then adb connect "$SERIAL" >/dev/null 2>&1 || true; fi
-scrcpy -s "$SERIAL" --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
+scrcpy -s "$SERIAL" --no-audio --max-size 540 --render-driver=software --window-title Android >/tmp/scrcpy.log 2>&1 &
 sleep 5
 websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
 sleep 2

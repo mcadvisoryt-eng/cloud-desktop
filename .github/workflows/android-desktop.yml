@@ -331,7 +331,7 @@ jobs:
                -AlwaysShared -localhost no >/tmp/xvnc.log 2>&1 &
           sleep 3
           adb connect localhost:5555 >/dev/null 2>&1 || true
-          scrcpy -s localhost:5555 --no-audio --max-size 540 --window-title Android >/tmp/scrcpy.log 2>&1 &
+          scrcpy -s localhost:5555 --no-audio --max-size 540 --render-driver=software --window-title Android >/tmp/scrcpy.log 2>&1 &
           sleep 5
           websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/websockify.log 2>&1 &
           sleep 2
