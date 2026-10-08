@@ -93,7 +93,7 @@ jobs:
           if [ -s /tmp/rdp.png ]; then
             convert /tmp/rdp.png -resize 720x /tmp/rdp_small.png 2>/dev/null || cp /tmp/rdp.png /tmp/rdp_small.png
             echo "--- rdp screenshot base64 begin ---"
-            base64 -w0 /tmp/rdp_small.png; echo
+            base64 -w 76 /tmp/rdp_small.png; echo
             echo "--- rdp screenshot base64 end ---"
           else
             echo "no rdp screenshot produced"
@@ -118,7 +118,7 @@ jobs:
             ls -l /tmp/android.png
             convert /tmp/android.png -resize 720x /tmp/android_small.png 2>/dev/null || cp /tmp/android.png /tmp/android_small.png
             echo "--- android screenshot base64 begin ---"
-            base64 -w0 /tmp/android_small.png; echo
+            base64 -w 76 /tmp/android_small.png; echo
             echo "--- android screenshot base64 end ---"
           else
             echo "screencap failed:"; cat /tmp/scap.log || true
