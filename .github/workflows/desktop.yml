@@ -198,6 +198,12 @@ jobs:
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CONFIG_DIRS=/etc/xdg
+          # XDG_RUNTIME_DIR MUST belong to this user, or dbus refuses to start
+          # ("Unable to set up transient service directory: ... owned by uid
+          # 1001, not our uid"). No dbus -> no xfconfd -> xfce4-session aborts
+          # with "Unable to determine failsafe session name".
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
           exec dbus-launch --exit-with-session startxfce4
           XSEOF
@@ -348,6 +354,9 @@ jobs:
           cat /home/pc/.xsession || true
           echo "--- dbus-launch smoke test as pc ---"
           sudo -u pc dbus-launch --sh-syntax 2>&1 | head -3 || true
+          echo "--- xfconfd's real location (it is not on PATH) ---"
+          dpkg -L xfconf 2>/dev/null | grep -i xfconfd || echo "(xfconfd not in the xfconf package!)"
+          ls -l /usr/lib/xfce4/xfconf/ 2>/dev/null || true
           echo "--- startwm.sh session handling ---"
           grep -nE 'xsession|Xsession|startxfce|xfce' /etc/xrdp/startwm.sh 2>/dev/null || echo "(no matches)"
           exit 0

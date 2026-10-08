@@ -61,7 +61,6 @@ while :; do
         --exclude '**/cache2/**' \
         --exclude '**/startupCache/**' \
         --exclude '**/shader-cache/**' \
-        --exclude '.xsession-errors' \
         --exclude '.ICEauthority' \
         --exclude 'gvfs/**' >>"$LOG" 2>&1; then
     log "Snapshot complete."
