@@ -107,6 +107,39 @@ password = your `DESKTOP_PASSWORD`.
 - **Backups run at below-normal priority** — Windows has no `ionice`, so the
   snapshot process is dropped to `BelowNormal` and the child rclone inherits it.
 
+## Installing apps (there is no Microsoft Store)
+
+`windows-latest` is **Windows Server**, and Server editions ship without the
+Microsoft Store. That isn't something that got removed — it was never included,
+and adding it to Server is unsupported and fragile.
+
+Use the command-line equivalents instead. The workflow sets both up at boot and
+prints their versions, so these work in the RDP session:
+
+```
+winget install Mozilla.Firefox        # winget — the Windows Package Manager
+winget search vlc
+choco install vlc -y                  # Chocolatey
+```
+
+- **winget** — Microsoft's own package manager; thousands of desktop apps.
+- **Chocolatey** — installed automatically if it isn't already present.
+- **Scoop** — install on demand (`irm get.scoop.sh | iex`) if you prefer it.
+
+**Store-only apps** ship as `.msix`/`.appx` bundles. Those can be *sideloaded*
+without the Store:
+
+```
+Add-AppxPackage -Path .\SomeApp.msix
+```
+
+but they usually need their dependencies (VCLibs, UI.Xaml) present first, so
+it's hit-or-miss — prefer a winget package when one exists.
+
+**Android apps on Windows are not an option here:** the Windows Subsystem for
+Android required nested virtualisation, which the Windows runner does not have.
+Use the Android variants (`cloudpc-android`, `cloudpc-emu`) for those.
+
 ## Caveats
 
 - It's Windows **Server**, not consumer Windows 11. Most desktop apps run, but

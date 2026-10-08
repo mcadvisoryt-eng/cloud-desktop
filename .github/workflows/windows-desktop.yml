@@ -131,6 +131,34 @@ jobs:
           & "$env:GITHUB_WORKSPACE/scripts/tune-rdp.ps1"
           exit 0
 
+      - name: Set up app installers (winget + Chocolatey)
+        run: |
+          # windows-latest is Windows Server, which ships WITHOUT the Microsoft
+          # Store — Server editions never included it, and adding it is
+          # unsupported. The practical equivalents are winget (the Windows
+          # Package Manager) and Chocolatey. Use those to install apps.
+          Write-Host "--- winget ---"
+          try {
+            winget --version
+          } catch {
+            Write-Host "::warning::winget not found; trying to register App Installer"
+            try { Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe } catch { Write-Host "::warning::could not enable winget" }
+          }
+          Write-Host "--- Chocolatey ---"
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco --version
+          } else {
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = 3072
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            choco --version
+          }
+          Write-Host "--- how to install apps ---"
+          Write-Host "  winget install <Id>        e.g. winget install Mozilla.Firefox"
+          Write-Host "  choco install <name> -y    e.g. choco install vlc -y"
+          Write-Host "  Store-only .msix can be sideloaded: Add-AppxPackage -Path <file>.msix"
+          exit 0
+
       - name: Install rclone + restore profile from encrypted backup
         env:
           RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
