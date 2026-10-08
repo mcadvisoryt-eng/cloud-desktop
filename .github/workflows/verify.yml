@@ -3,12 +3,14 @@ name: verify
 # End-to-end verification that runs ON a runner (not in a sandbox), because a
 # runner can join the tailnet and actually reach the desktops.
 #
-# It: joins the tailnet, lists devices, tests TCP reachability, RDPs into the
-# Linux desktop and screenshots what comes back, attaches to the Android
-# emulator over adb and screenshots it, and checks backup freshness.
+# IMPORTANT: it resolves each host's tailnet IP from the Tailscale API and uses
+# those, never MagicDNS names — joining with --accept-dns=false (so we don't
+# disturb the runner's own DNS) disables MagicDNS resolution, so names fail.
 #
-# Both screenshots are printed into the log as base64 (downscaled) so they can
-# be read without downloading artifacts.
+# It: lists devices, tests TCP reachability, RDPs into the Linux desktop and
+# screenshots what comes back, attaches to the Android emulator over adb and
+# screenshots it, and checks backup freshness. Screenshots are printed as
+# base64 (downscaled) so they can be read from the log without artifacts.
 
 on:
   workflow_dispatch:
@@ -26,8 +28,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      TAILNET: tail996723.ts.net
     steps:
       - uses: actions/checkout@v4
 
@@ -36,9 +36,27 @@ jobs:
           set -x
           sudo apt-get update -qq
           sudo apt-get install -y -qq adb jq curl netcat-openbsd \
-            xvfb x11-utils imagemagick freerdp2-x11 || \
-            echo "::warning::some tools failed to install"
+            xvfb x11-utils imagemagick freerdp2-x11 || echo "::warning::some tools failed"
           for b in adb jq nc Xvfb import xfreerdp; do command -v "$b" || echo "MISSING: $b"; done
+
+      - name: Resolve tailnet IPs (no MagicDNS needed)
+        env:
+          TS_API_KEY: ${{ secrets.TS_API_KEY }}
+        run: |
+          set -uo pipefail
+          if [ -z "${TS_API_KEY:-}" ]; then echo "::error::no TS_API_KEY"; exit 1; fi
+          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
+            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json
+          echo "--- devices ---"
+          jq -r '.devices[] | [.name, (.addresses[0] // "-"), (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
+            /tmp/devices.json | column -t -s $'\t' || true
+          getip() { jq -r --arg n "$1" '.devices[] | select((.name|split(".")[0])==$n) | .addresses[0]' /tmp/devices.json | head -1; }
+          {
+            echo "CP_IP=$(getip cloudpc)"
+            echo "CPWIN_IP=$(getip cloudpc-win)"
+            echo "CPAND_IP=$(getip cloudpc-android)"
+          } >> "$GITHUB_ENV"
+          echo "resolved: cloudpc=$(getip cloudpc) win=$(getip cloudpc-win) android=$(getip cloudpc-android)"
 
       - name: Join the tailnet (temporary, ephemeral)
         env:
@@ -48,28 +66,16 @@ jobs:
           if [ -z "${TS_AUTHKEY:-}" ]; then echo "::warning::no TS_AUTHKEY"; exit 0; fi
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="cloudpc-verify" --accept-routes --accept-dns=false
-          tailscale status | head -10 || true
+          tailscale status | head -12 || true
 
-      - name: Tailnet devices (API)
-        env:
-          TS_API_KEY: ${{ secrets.TS_API_KEY }}
-        run: |
-          set -uo pipefail
-          if [ -z "${TS_API_KEY:-}" ]; then echo "no TS_API_KEY"; exit 0; fi
-          curl -fsS -H "Authorization: Bearer $TS_API_KEY" \
-            "https://api.tailscale.com/api/v2/tailnet/-/devices" -o /tmp/devices.json || exit 0
-          jq -r '.devices[] | [.name, (if .connectedToControl then "ONLINE" else "offline" end)] | @tsv' \
-            /tmp/devices.json | column -t -s $'\t' || true
-
-      - name: TCP reachability
+      - name: TCP reachability (by IP)
         run: |
           set -x
-          for h in cloudpc cloudpc-win cloudpc-android; do
-            echo -n "${h}:3389 -> "
-            timeout 8 nc -zv "${h}.${TAILNET}" 3389 2>&1 | tail -1 || echo "unreachable"
+          for pair in "cloudpc:${CP_IP}:3389" "cloudpc-win:${CPWIN_IP}:3389" "cloudpc-android:${CPAND_IP}:3389" "cloudpc:${CP_IP}:5555"; do
+            name="${pair%%:*}"; rest="${pair#*:}"; ip="${rest%%:*}"; port="${rest##*:}"
+            echo -n "${name} ${ip}:${port} -> "
+            timeout 8 nc -zv "$ip" "$port" 2>&1 | tail -1 || echo "unreachable"
           done
-          echo -n "cloudpc:5555 (emulator adb) -> "
-          timeout 8 nc -zv "cloudpc.${TAILNET}" 5555 2>&1 | tail -1 || echo "unreachable"
 
       - name: RDP into cloudpc and screenshot what comes back
         env:
@@ -79,42 +85,41 @@ jobs:
           export DISPLAY=:99
           Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
           sleep 3
-          timeout 60 xfreerdp /v:"cloudpc.${TAILNET}" /u:pc /p:"${DESKTOP_PASSWORD}" \
-            /cert:ignore /size:1280x800 /dynamic-resolution- /log-level:WARN >/tmp/rdp.log 2>&1 &
-          RDP_PID=$!
-          sleep 35
-          import -window root /tmp/rdp.png 2>/tmp/import.log || xwd -root -silent | convert xwd:- /tmp/rdp.png || echo "screenshot failed"
-          echo "--- rdp log ---"; tail -25 /tmp/rdp.log || true
-          if [ -f /tmp/rdp.png ]; then
-            echo "--- rdp screenshot (base64, downscaled) ---"
+          timeout 70 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
+            /cert:ignore /size:1280x800 /dynamic-resolution- /log-level:INFO >/tmp/rdp.log 2>&1 &
+          sleep 40
+          import -window root /tmp/rdp.png 2>/tmp/import.log || xwd -root -silent 2>/dev/null | convert xwd:- /tmp/rdp.png || echo "screenshot failed"
+          echo "--- rdp log (last 30) ---"; tail -30 /tmp/rdp.log || true
+          if [ -s /tmp/rdp.png ]; then
             convert /tmp/rdp.png -resize 720x /tmp/rdp_small.png 2>/dev/null || cp /tmp/rdp.png /tmp/rdp_small.png
+            echo "--- rdp screenshot base64 begin ---"
             base64 -w0 /tmp/rdp_small.png; echo
+            echo "--- rdp screenshot base64 end ---"
           else
             echo "no rdp screenshot produced"
           fi
-          kill $RDP_PID 2>/dev/null || true
+          pkill xfreerdp 2>/dev/null || true
           exit 0
 
-      - name: Android emulator over adb + screenshot
+      - name: Android emulator over adb + screenshot (by IP)
         run: |
           set -x
           adb start-server >/dev/null 2>&1 || true
-          adb connect "cloudpc.${TAILNET}:5555" || true
+          SERIAL="${CP_IP}:5555"
+          adb connect "$SERIAL" || true
           sleep 3
           adb devices -l || true
-          SERIAL="cloudpc.${TAILNET}:5555"
-          echo "--- android version ---"
-          adb -s "$SERIAL" shell getprop ro.build.version.release 2>&1 | head -2 || true
-          echo "--- abilist ---"
-          adb -s "$SERIAL" shell getprop ro.product.cpu.abilist 2>&1 | head -2 || true
-          echo "--- Play Store present? ---"
-          adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -iE 'vending|gms' || echo "(no Play/GSF packages)"
+          echo "--- android version ---"; adb -s "$SERIAL" shell getprop ro.build.version.release 2>&1 | head -2 || true
+          echo "--- abilist ---";        adb -s "$SERIAL" shell getprop ro.product.cpu.abilist 2>&1 | head -2 || true
+          echo "--- Play/GSF packages ---"
+          adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -iE 'vending|gms' || echo "(none)"
           echo "--- screenshot ---"
-          if adb -s "$SERIAL" exec-out screencap -p > /tmp/android.png 2>/tmp/scap.log; then
+          if adb -s "$SERIAL" exec-out screencap -p > /tmp/android.png 2>/tmp/scap.log && [ -s /tmp/android.png ]; then
             ls -l /tmp/android.png
             convert /tmp/android.png -resize 720x /tmp/android_small.png 2>/dev/null || cp /tmp/android.png /tmp/android_small.png
-            echo "--- android screenshot (base64, downscaled) ---"
+            echo "--- android screenshot base64 begin ---"
             base64 -w0 /tmp/android_small.png; echo
+            echo "--- android screenshot base64 end ---"
           else
             echo "screencap failed:"; cat /tmp/scap.log || true
           fi
