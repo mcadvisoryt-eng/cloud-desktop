@@ -106,6 +106,15 @@ jobs:
           echo "--- failure logs (crypt1:logs — only written when something FAILED) ---"
           timeout 120 rclone lsf --max-depth 1 crypt1:logs 2>/dev/null | sort | tail -8 || echo "(none — good)"
           echo
+          echo "--- newest Android backup failure log ---"
+          newest=$(timeout 60 rclone lsf --max-depth 1 crypt1:logs 2>/dev/null | grep '^android-backup-' | sort | tail -1)
+          if [ -n "$newest" ]; then
+            echo "file: $newest"
+            timeout 60 rclone cat "crypt1:logs/$newest" 2>/dev/null | tail -45 || echo "(could not read the log)"
+          else
+            echo "(no android-backup failure logs — good)"
+          fi
+          echo
           echo "--- sizes ---"
           for r in crypt1:home crypt1:winhome crypt1:android; do
             echo -n "$r: "
