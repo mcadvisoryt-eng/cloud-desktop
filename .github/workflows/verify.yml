@@ -86,8 +86,8 @@ jobs:
           Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
           sleep 3
           timeout 70 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
-            /cert:ignore /size:1280x800 /dynamic-resolution- /log-level:INFO >/tmp/rdp.log 2>&1 &
-          sleep 40
+            /cert:ignore /size:1280x800 /log-level:INFO >/tmp/rdp.log 2>&1 &
+          sleep 50
           import -window root /tmp/rdp.png 2>/tmp/import.log || xwd -root -silent 2>/dev/null | convert xwd:- /tmp/rdp.png || echo "screenshot failed"
           echo "--- rdp log (last 30) ---"; tail -30 /tmp/rdp.log || true
           if [ -s /tmp/rdp.png ]; then
