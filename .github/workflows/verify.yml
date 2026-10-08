@@ -85,11 +85,14 @@ jobs:
           export DISPLAY=:99
           Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
           sleep 3
-          timeout 70 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
-            /cert:ignore /size:1280x800 /log-level:INFO >/tmp/rdp.log 2>&1 &
-          sleep 50
+          stdbuf -oL -eL timeout 90 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
+            /cert:ignore /size:1280x800 /sec:tls /log-level:DEBUG >/tmp/rdp.log 2>&1 &
+          RDP_PID=$!
+          sleep 55
+          echo "xfreerdp still alive: $(kill -0 $RDP_PID 2>/dev/null && echo yes || echo no)"
           import -window root /tmp/rdp.png 2>/tmp/import.log || xwd -root -silent 2>/dev/null | convert xwd:- /tmp/rdp.png || echo "screenshot failed"
-          echo "--- rdp log (last 30) ---"; tail -30 /tmp/rdp.log || true
+          echo "--- rdp log (full) ---"; cat /tmp/rdp.log || true
+          echo "--- rdp log end ---"
           if [ -s /tmp/rdp.png ]; then
             convert /tmp/rdp.png -resize 720x /tmp/rdp_small.png 2>/dev/null || cp /tmp/rdp.png /tmp/rdp_small.png
             echo "--- rdp screenshot base64 begin ---"
