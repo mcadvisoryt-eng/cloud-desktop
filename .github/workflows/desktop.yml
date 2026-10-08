@@ -359,6 +359,19 @@ jobs:
           ls -l /usr/lib/xfce4/xfconf/ 2>/dev/null || true
           echo "--- startwm.sh session handling ---"
           grep -nE 'xsession|Xsession|startxfce|xfce' /etc/xrdp/startwm.sh 2>/dev/null || echo "(no matches)"
+          echo "--- XFCE session self-test (does startxfce4 actually survive?) ---"
+          Xvfb :98 -screen 0 800x600x24 >/tmp/xvfb98.log 2>&1 &
+          sleep 3
+          sudo -u pc env DISPLAY=:98 XDG_RUNTIME_DIR="/run/user/$(id -u pc)" HOME=/home/pc \
+            dbus-launch --exit-with-session startxfce4 >/tmp/xfce_test.log 2>&1 &
+          sleep 15
+          if sudo -u pc pgrep -a xfce4-session >/dev/null; then
+            echo "XFCE SESSION STARTED OK"
+            sudo -u pc pgrep -a xfce4-session | head -3
+          else
+            echo "XFCE SESSION FAILED TO START:"
+            tail -30 /tmp/xfce_test.log 2>/dev/null || true
+          fi
           exit 0
 
       - name: Start xrdp + run session
