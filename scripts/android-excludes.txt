@@ -14,3 +14,8 @@ dalvik-cache/**
 **/*.tmp
 **/lost+found/**
 **/*.sock
+# Crash dumps and ANR traces. Android writes these continuously, so rclone
+# catches them mid-write and fails the whole backup with
+# "corrupted on transfer: sizes differ". They are worthless to restore.
+tombstones/**
+anr/**
