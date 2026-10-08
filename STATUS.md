@@ -45,16 +45,21 @@ Screenshots are printed as **base64 wrapped at 76 chars** between
   (step "Install the Android emulator + create an AVD" goes green), and it now
   uses the `google_apis_playstore` image, so it has the Play Store.
 - **winget + Chocolatey** are set up on the Windows desktop.
+- **The XFCE session starts and survives** — verified by the desktop's own
+  self-test, which launches `startxfce4` on a scratch display and checks it's
+  still running: `XFCE SESSION STARTED OK` / `xfce4-session` pid present
+  (2026-10-08 17:53). This is the fix that matters — the `XDG_RUNTIME_DIR`
+  correction resolved the "Unable to determine failsafe session name" abort.
 - **Tailnet names are clean** — `cloudpc`, `cloudpc-win`, `cloudpc-android`, no
   `-1`/`-2` suffixes (hostname-claim works).
 
 ## Known open issues
 
-- **The RDP session itself is not yet verified.** The test client
-  (`xfreerdp` into a headless Xvfb) prints its version banner and then hangs
-  with no error, producing a blank screenshot. That may be a harness problem
-  rather than a desktop problem — but until it's resolved we cannot claim the
-  XFCE session renders. This is the top item.
+- **The RDP *client* test is broken, not the desktop.** `xfreerdp` into a
+  headless Xvfb prints its banner and then hangs with no error, producing a
+  blank screenshot. Since the desktop's own self-test proves the session starts,
+  this is a harness problem — but it means we have not yet seen a screenshot of
+  the live RDP session. Worth fixing so the hourly check can see the screen.
 - **The emulator's adb is not reachable over the tailnet** — port 5555 is
   refused externally because the emulator binds it to localhost. That's fine:
   the emulator is meant to be seen *on the desktop* over RDP, not via adb.
