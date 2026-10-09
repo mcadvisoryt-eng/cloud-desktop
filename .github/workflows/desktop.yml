@@ -402,9 +402,17 @@ jobs:
           Xvfb :97 -screen 0 1024x768x24 >/tmp/xvfb97.log 2>&1 || true
           sleep 3
           DISPLAY=:97 timeout 70 xfreerdp /v:127.0.0.1 /u:pc /p:"$DESKTOP_PASSWORD" \
-            /cert:ignore /size:1024x768 /sec:tls >/tmp/rdp_local.log 2>&1 || true
+            /cert:ignore /size:1024x768 /sec:tls </dev/null >/tmp/rdp_local.log 2>&1 || true
           sleep 45
           DISPLAY=:97 import -window root /tmp/rdp_local.png 2>/dev/null || true
+          # Persist the whole result into ~/selftest.log so it is captured by the
+          # home backup and can be read later even if this run is cancelled
+          # (GitHub discards a cancelled step's buffered output).
+          {
+            echo "=== local rdp log ==="; cat /tmp/rdp_local.log 2>/dev/null
+            echo "=== ~/.xsession-errors ==="; sudo cat /home/pc/.xsession-errors 2>/dev/null
+            echo "=== xfce processes ==="; pgrep -a -u pc xfce4-session || echo "(none)"
+          } | sudo tee /home/pc/selftest.log >/dev/null 2>&1 || true
           echo "--- local rdp log ---"; cat /tmp/rdp_local.log || true
           echo "--- ~/.xsession-errors (the real error) ---"
           sudo cat /home/pc/.xsession-errors 2>/dev/null | tail -40 || echo "(no .xsession-errors)"
