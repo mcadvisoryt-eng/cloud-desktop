@@ -419,8 +419,12 @@ jobs:
           # Runs on this machine, so no tailnet involved. ---
           Xvfb :97 -screen 0 1024x768x24 >/tmp/xvfb97.log 2>&1 || true
           sleep 3
+          # A window manager in the Xvfb makes the RDP window actually map, so the
+          # screenshot below captures the real desktop instead of a blank root.
+          DISPLAY=:97 dbus-launch xfwm4 >/tmp/xfwm97.log 2>&1 || true
+          sleep 2
           DISPLAY=:97 timeout 70 xfreerdp /v:127.0.0.1 /u:pc /p:"$DESKTOP_PASSWORD" \
-            /cert:ignore /size:1024x768 /sec:tls </dev/null >/tmp/rdp_local.log 2>&1 || true
+            /cert:ignore /size:1024x768 </dev/null >/tmp/rdp_local.log 2>&1 || true
           sleep 45
           DISPLAY=:97 import -window root /tmp/rdp_local.png 2>/dev/null || true
           # Persist the whole result into ~/selftest.log so it is captured by the

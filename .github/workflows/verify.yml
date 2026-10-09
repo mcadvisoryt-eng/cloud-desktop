@@ -36,7 +36,7 @@ jobs:
           set -x
           sudo apt-get update -qq
           sudo apt-get install -y -qq adb jq curl netcat-openbsd \
-            xvfb x11-utils imagemagick freerdp2-x11 || echo "::warning::some tools failed"
+            xvfb x11-utils imagemagick freerdp2-x11 openbox || echo "::warning::some tools failed"
           for b in adb jq nc Xvfb import xfreerdp; do command -v "$b" || echo "MISSING: $b"; done
 
       - name: Resolve tailnet IPs (no MagicDNS needed)
@@ -85,8 +85,10 @@ jobs:
           export DISPLAY=:99
           Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
           sleep 3
+          DISPLAY=:99 openbox >/tmp/openbox.log 2>&1 &
+          sleep 2
           stdbuf -oL -eL timeout 90 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
-            /cert:ignore /size:1280x800 /sec:negotiate /log-level:DEBUG >/tmp/rdp.log 2>&1 &
+            /cert:ignore /size:1280x800 /log-level:DEBUG >/tmp/rdp.log 2>&1 &
           RDP_PID=$!
           sleep 55
           echo "xfreerdp still alive: $(kill -0 $RDP_PID 2>/dev/null && echo yes || echo no)"
