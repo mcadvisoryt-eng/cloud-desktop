@@ -198,6 +198,7 @@ jobs:
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_DATA_DIRS=/usr/local/share:/usr/share
           # XDG_RUNTIME_DIR MUST belong to this user, or dbus refuses to start
           # ("Unable to set up transient service directory: ... owned by uid
           # 1001, not our uid"). No dbus -> no xfconfd -> xfce4-session aborts
@@ -205,7 +206,7 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
-          exec dbus-launch --exit-with-session startxfce4
+          exec dbus-launch --exit-with-session /bin/sh -c 'command -v xfconfd >/dev/null 2>&1 && { xfconfd --daemon >/dev/null 2>&1 & sleep 1; }; exec startxfce4'
           XSEOF
           sudo chmod +x /home/pc/.xsession
           sudo chown pc:pc /home/pc/.xsession
@@ -225,10 +226,11 @@ jobs:
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_DATA_DIRS=/usr/local/share:/usr/share
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
-          exec dbus-launch --exit-with-session startxfce4
+          exec dbus-launch --exit-with-session /bin/sh -c 'command -v xfconfd >/dev/null 2>&1 && { xfconfd --daemon >/dev/null 2>&1 & sleep 1; }; exec startxfce4'
           STARTWM
           sudo chmod +x /etc/xrdp/startwm.sh
           echo "startwm.sh overridden:"; cat /etc/xrdp/startwm.sh
@@ -434,6 +436,12 @@ jobs:
             echo "=== local rdp log ==="; cat /tmp/rdp_local.log 2>/dev/null
             echo "=== ~/.xsession-errors ==="; sudo cat /home/pc/.xsession-errors 2>/dev/null
             echo "=== xfce processes ==="; pgrep -a -u pc xfce4-session || echo "(none)"
+            echo "=== xrdp sesman log (tail) ==="; sudo tail -60 /var/log/xrdp-sesman.log 2>/dev/null
+            echo "=== startwm.sh on disk ==="; sudo cat /etc/xrdp/startwm.sh 2>/dev/null
+            echo "=== sesman.ini session params ==="; grep -i -E "startwm|wm|session|param" /etc/xrdp/sesman.ini 2>/dev/null
+            echo "=== xfconfd binary ==="; command -v xfconfd || ls -l /usr/lib/xfce4/xfconf/xfconfd 2>/dev/null || echo "(xfconfd not found)"
+            echo "=== xfconf dbus service ==="; ls /usr/share/dbus-1/services/ 2>/dev/null | grep -i xfconf || echo "(no xfconf service file)"
+            echo "=== ~/.config ==="; ls -la /home/pc/.config 2>/dev/null | head
           } | sudo tee /home/pc/selftest.log >/dev/null 2>&1 || true
           echo "--- local rdp log ---"; cat /tmp/rdp_local.log || true
           echo "--- ~/.xsession-errors (the real error) ---"
