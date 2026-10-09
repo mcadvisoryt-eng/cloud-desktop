@@ -1,0 +1,134 @@
+name: macos-desktop
+
+# A macOS (Apple-silicon) desktop you can reach over the tailnet with any VNC
+# client (Apple Screen Sharing, RealVNC Viewer, bVNC on Android, ...).
+#
+# Why this exists: GitHub-hosted runners are only Ubuntu, Windows and macOS.
+# This is the "other OS" option — macOS Aqua over VNC instead of RDP.
+#
+# Caveat, stated honestly: Apple documents that since macOS 12.1 the `kickstart`
+# tool can no longer fully enable Screen Sharing and may leave you view-only.
+# If that happens we fall back to a third-party VNC server (TigerVNC), which
+# serves an X11 desktop rather than Aqua. The run log says which one is live.
+#
+# Free: on a PUBLIC repo macOS runners are unmetered. On a private repo they
+# cost 10x minutes, which is why this repo is public by design.
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: 'How long to keep the Mac desktop alive'
+        required: false
+        default: '300'
+
+concurrency:
+  group: macos-desktop
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-latest          # Apple silicon, macOS 26
+    timeout-minutes: 345
+    env:
+      SESSION_MINUTES: ${{ github.event.inputs.session_minutes || '300' }}
+      TS_HOSTNAME: 'cloudpc-mac'
+      VNC_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable the macOS VNC server (Apple Screen Sharing / ARD)
+        run: |
+          set -x
+          KS=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
+          # Legacy VNC passwords are limited to 8 characters.
+          VNC8="$(printf '%s' "${VNC_PASSWORD:-cloudpc1}" | cut -c1-8)"
+          sudo "$KS" -configure -allowAccessFor -allUsers -privs -all || true
+          sudo "$KS" -configure -clientopts -setvnclegacy -vnclegacy yes || true
+          sudo "$KS" -configure -clientopts -setvncpw -vncpw "$VNC8" || true
+          sudo "$KS" -restart -agent -console || true
+          sudo "$KS" -activate || true
+          sleep 3
+          echo "--- is 5900 listening? ---"
+          sudo lsof -iTCP:5900 -sTCP:LISTEN -n -P || echo "NOT LISTENING"
+          echo "--- ARD agent running? ---"
+          pgrep -fl ARDAgent || echo "no ARDAgent"
+
+      - name: Fall back to TigerVNC if Apple Screen Sharing is not serving
+        run: |
+          set -x
+          if sudo lsof -iTCP:5900 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+            echo "Apple VNC is up on 5900 — no fallback needed."
+            exit 0
+          fi
+          echo "Apple VNC is not listening; installing TigerVNC as a fallback."
+          brew install --quiet tigervnc || brew install tigervnc || true
+          # A virtual X11 desktop (not Aqua) on :1, VNC on 5901.
+          ( vncserver :1 -geometry 1440x900 -depth 24 -localhost no \
+              -PasswordFile <(printf '%s' "${VNC_PASSWORD:-cloudpc1}" | vncpasswd -f) \
+              >/tmp/vncserver.log 2>&1 ) || cat /tmp/vncserver.log || true
+          sleep 3
+          sudo lsof -iTCP:5901 -sTCP:LISTEN -n -P || echo "5901 not listening either"
+
+      - name: Join the tailnet
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -x
+          if [ -z "${TS_AUTHKEY:-}" ]; then
+            echo "::error::TS_AUTHKEY not set — cannot join the tailnet"
+            exit 1
+          fi
+          brew install --quiet tailscale || brew install tailscale || true
+          TS_BIN="$(command -v tailscale || echo /opt/homebrew/bin/tailscale)"
+          TS_DAEMON="$(command -v tailscaled || echo /opt/homebrew/bin/tailscaled)"
+          sudo "$TS_DAEMON" \
+            --state=/var/lib/tailscale/tailscaled.state \
+            --socket=/var/run/tailscaled.socket >/tmp/tailscaled.log 2>&1 &
+          sleep 6
+          sudo "$TS_BIN" --socket=/var/run/tailscaled.socket up \
+            --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" --accept-dns=false \
+            || sudo "$TS_BIN" up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" --accept-dns=false \
+            || { echo "::error::tailscale up failed"; tail -30 /tmp/tailscaled.log; exit 1; }
+          sleep 3
+          sudo "$TS_BIN" --socket=/var/run/tailscaled.socket status || "$TS_BIN" status || true
+          echo "--- tailnet IPs ---"
+          sudo "$TS_BIN" --socket=/var/run/tailscaled.socket ip -4 2>/dev/null \
+            || "$TS_BIN" ip -4 2>/dev/null || true
+
+      - name: Prove the desktop is there (screenshot + port check)
+        run: |
+          set -x
+          echo "--- VNC ports ---"
+          sudo lsof -iTCP -sTCP:LISTEN -n -P | grep -E '5900|5901' || echo "no VNC port listening"
+          echo "--- desktop screenshot ---"
+          screencapture -x /tmp/mac.png 2>/tmp/sc.err || echo "screencapture failed: $(cat /tmp/sc.err)"
+          ls -l /tmp/mac.png || true
+          if [ -s /tmp/mac.png ]; then
+            sips -Z 720 /tmp/mac.png --out /tmp/mac_small.png >/dev/null 2>&1 || cp /tmp/mac.png /tmp/mac_small.png
+            echo "--- mac screenshot base64 begin ---"
+            base64 -i /tmp/mac_small.png
+            echo "--- mac screenshot base64 end ---"
+          fi
+          echo "--- logged-in console user ---"
+          stat -f '%Su' /dev/console || true
+
+      - name: Upload the screenshot as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-desktop-screenshot
+          path: /tmp/mac.png
+          if-no-files-found: ignore
+
+      - name: Keep the desktop alive
+        run: |
+          set -x
+          end=$(( $(date +%s) + SESSION_MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            # Keep the ARD agent (and the tailnet) up; cheap liveness check.
+            pgrep -f ARDAgent >/dev/null 2>&1 || \
+              sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -restart -agent >/dev/null 2>&1 || true
+            sleep 60
+          done
+          echo "Session time budget reached."
