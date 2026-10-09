@@ -89,3 +89,25 @@ Screenshots are printed as **base64 wrapped at 76 chars** between
 3. Consider Google's official emulator container
    (`us-docker.pkg.dev/android-emulator-268719/images/...`) as a sturdier
    emulator base if the local AVD proves flaky.
+
+
+---
+
+## Update — 2026-10-09 (overnight)
+
+- **The user still sees the XFCE failsafe error over RDP**, yet the desktop's own
+  self-test reports `XFCE SESSION STARTED OK`. So the failure is specific to the
+  **xrdp login path** (`startwm.sh -> /etc/X11/Xsession -> ~/.xsession`), not to
+  XFCE itself.
+- `desktop.yml` now runs a **local RDP self-test on that exact path** and writes
+  the result to `~/selftest.log`, which the home backup picks up. Read it with
+  the maintenance workflow's `backup` action:
+  `rclone cat crypt1:home/selftest.log`.
+- **GitHub discards a cancelled step's buffered output** — that is why earlier
+  attempts to read the self-test from the run log came back empty. Persisting it
+  to a file was the fix for the *diagnostic*, not for the desktop.
+- `xfreerdp` in a headless Xvfb hangs (banner, then nothing) in both the verify
+  workflow and the self-test. stdin is now redirected from /dev/null; if it
+  still hangs, the next suspect is the security-layer negotiation.
+- Open item: decide whether to keep the local emulator AVD or switch to Google's
+  official emulator container.

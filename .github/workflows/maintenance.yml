@@ -115,6 +115,9 @@ jobs:
             echo "(no android-backup failure logs — good)"
           fi
           echo
+          echo "--- desktop self-test log (crypt1:home/selftest.log, written by desktop.yml) ---"
+          timeout 60 rclone cat crypt1:home/selftest.log 2>/dev/null | tail -45 || echo "(none yet — the desktop hasn't run the new self-test)"
+          echo
           echo "--- sizes ---"
           for r in crypt1:home crypt1:winhome crypt1:android; do
             echo -n "$r: "
