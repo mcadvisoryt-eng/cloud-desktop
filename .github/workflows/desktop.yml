@@ -214,6 +214,24 @@ jobs:
           # desktop, so losing window settings costs nothing).
           sudo rm -rf /home/pc/.config/xfce4 /home/pc/.config/xfconf \
                       /home/pc/.cache/sessions 2>/dev/null || true
+          # Override xrdp's startwm.sh so the login path runs EXACTLY what the
+          # working self-test runs. The stock startwm.sh execs /etc/X11/Xsession,
+          # which itself launches dbus; our .xsession then unsets
+          # DBUS_SESSION_BUS_ADDRESS and launches dbus again -> no usable session
+          # bus -> xfconfd never starts -> "Unable to determine failsafe session
+          # name". Doing it in one place removes that conflict.
+          sudo tee /etc/xrdp/startwm.sh >/dev/null <<'STARTWM'
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          xset s off -dpms 2>/dev/null || true
+          exec dbus-launch --exit-with-session startxfce4
+          STARTWM
+          sudo chmod +x /etc/xrdp/startwm.sh
+          echo "startwm.sh overridden:"; cat /etc/xrdp/startwm.sh
 
       - name: Claim the hostname (drop any older node with this name)
         env:
