@@ -86,7 +86,7 @@ jobs:
           Xvfb :99 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &
           sleep 3
           stdbuf -oL -eL timeout 90 xfreerdp /v:"${CP_IP}" /u:pc /p:"${DESKTOP_PASSWORD}" \
-            /cert:ignore /size:1280x800 /sec:tls /log-level:DEBUG >/tmp/rdp.log 2>&1 &
+            /cert:ignore /size:1280x800 /sec:negotiate /log-level:DEBUG >/tmp/rdp.log 2>&1 &
           RDP_PID=$!
           sleep 55
           echo "xfreerdp still alive: $(kill -0 $RDP_PID 2>/dev/null && echo yes || echo no)"
