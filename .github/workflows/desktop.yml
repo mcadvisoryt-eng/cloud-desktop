@@ -378,6 +378,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RESTART_PAT }}
           GH_REPOSITORY: ${{ github.repository }}
+          DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
         run: |
           set -euo pipefail
           sudo systemctl enable --now xrdp 2>/dev/null || sudo service xrdp restart
@@ -393,6 +394,27 @@ jobs:
             echo "::error::xrdp failed to start listening on :3389"
             sudo service xrdp status || true
             exit 1
+          fi
+          # --- Local RDP self-test: exercise the REAL xrdp login path
+          # (startwm.sh -> /etc/X11/Xsession -> ~/.xsession) and dump the
+          # session's own error log, the only place the true cause shows up.
+          # Runs on this machine, so no tailnet involved. ---
+          Xvfb :97 -screen 0 1024x768x24 >/tmp/xvfb97.log 2>&1 || true
+          sleep 3
+          DISPLAY=:97 timeout 70 xfreerdp /v:127.0.0.1 /u:pc /p:"$DESKTOP_PASSWORD" \
+            /cert:ignore /size:1024x768 /sec:tls >/tmp/rdp_local.log 2>&1 || true
+          sleep 45
+          DISPLAY=:97 import -window root /tmp/rdp_local.png 2>/dev/null || true
+          echo "--- local rdp log ---"; cat /tmp/rdp_local.log || true
+          echo "--- ~/.xsession-errors (the real error) ---"
+          sudo cat /home/pc/.xsession-errors 2>/dev/null | tail -40 || echo "(no .xsession-errors)"
+          echo "--- xfce processes for pc ---"
+          pgrep -a -u pc xfce4-session || echo "(no xfce4-session for pc)"
+          if [ -s /tmp/rdp_local.png ]; then
+            convert /tmp/rdp_local.png -resize 700x /tmp/rdp_local_s.png 2>/dev/null || cp /tmp/rdp_local.png /tmp/rdp_local_s.png
+            echo "--- local rdp screenshot base64 begin ---"
+            base64 -w 76 /tmp/rdp_local_s.png; echo
+            echo "--- local rdp screenshot base64 end ---"
           fi
           bash "$GITHUB_WORKSPACE/scripts/run-session.sh"
 
