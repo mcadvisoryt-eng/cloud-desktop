@@ -1,0 +1,108 @@
+name: android-emulator-probe
+
+# TEMPORARY PROBE — delete once it has answered the question.
+# Can GitHub's hosted runners actually run an Android emulator, and with what
+# acceleration? Runs the same attempt on macOS (arm64) and Ubuntu (x86_64) so
+# the two can be compared directly. Self-terminating, so the log is readable.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest          # Apple silicon
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is hardware virtualisation available?
+        run: |
+          set -x
+          uname -m
+          sysctl -n machdep.cpu.brand_string || true
+          echo "kern.hv_support = $(sysctl -n kern.hv_support 2>/dev/null || echo unknown)"
+
+      - name: Install the Android SDK + arm64 emulator
+        run: |
+          set -x
+          brew install --quiet --cask android-commandlinetools || true
+          export ANDROID_HOME="$HOME/Library/Android/sdk"
+          mkdir -p "$ANDROID_HOME"
+          SDKMGR="$(find /opt/homebrew /usr/local -name sdkmanager 2>/dev/null | head -1)"
+          echo "sdkmanager=$SDKMGR"
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+            "$SDKMGR" --sdk_root="$ANDROID_HOME" "platform-tools" "emulator" \
+              "system-images;android-34;google_apis;arm64-v8a" || true
+          fi
+          ls -1 "$ANDROID_HOME" 2>/dev/null || true
+
+      - name: Try to boot the arm64 emulator (HVF, then software)
+        run: |
+          set -x
+          export ANDROID_HOME="$HOME/Library/Android/sdk"
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          AVDDIR="$(find /opt/homebrew /usr/local -name avdmanager 2>/dev/null | head -1)"
+          [ -n "$AVDDIR" ] && echo no | "$AVDDIR" create avd -n probe \
+            -k "system-images;android-34;google_apis;arm64-v8a" -d pixel_6 || true
+          if command -v emulator >/dev/null 2>&1; then
+            nohup emulator -avd probe -no-window -no-audio -no-boot-anim \
+              -gpu swiftshader_indirect -accel hvf >/tmp/emu_hvf.log 2>&1 &
+          else
+            echo "emulator binary not installed"
+          fi
+          sleep 120
+          echo "--- adb devices (after HVF attempt) ---"; adb devices || true
+          adb -s emulator-5554 shell getprop ro.build.version.release 2>&1 | head -3 || true
+          echo "--- HVF emulator log tail ---"; tail -25 /tmp/emu_hvf.log 2>/dev/null || true
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          set -x
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || echo "no /dev/kvm"
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+
+      - name: Install the Android SDK + x86_64 emulator
+        run: |
+          set -x
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq adb unzip curl
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/clt.zip
+          unzip -q /tmp/clt.zip -d "$HOME/android-sdk/cmdline-tools"
+          mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+          export ANDROID_HOME="$HOME/android-sdk"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" \
+            "system-images;android-34;google_apis;x86_64" || true
+
+      - name: Boot the emulator with KVM
+        run: |
+          set -x
+          export ANDROID_HOME="$HOME/android-sdk"
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n probe \
+            -k "system-images;android-34;google_apis;x86_64" -d pixel_6 || true
+          nohup emulator -avd probe -no-window -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect >/tmp/emu.log 2>&1 &
+          adb wait-for-device || true
+          for i in $(seq 1 30); do
+            boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            echo "t=${i}0s boot_completed=$boot"
+            [ "$boot" = "1" ] && break
+            sleep 10
+          done
+          echo "--- adb devices ---"; adb devices || true
+          echo "--- android version ---"; adb shell getprop ro.build.version.release 2>&1 | head -3 || true
+          echo "--- emulator accel check ---"; emulator -accel-check 2>&1 | head -5 || true
+          echo "--- emulator log tail ---"; tail -15 /tmp/emu.log 2>/dev/null || true
