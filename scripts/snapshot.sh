@@ -48,6 +48,11 @@ fi
 
 log "Snapshotting /home/pc -> ${REMOTE} (trash: ${TRASH_REMOTE}/${STAMP})"
 
+# Heartbeat: refreshed on every snapshot so a watchdog can tell a WEDGED session
+# (no snapshots at all) from a merely quiet one. Best-effort; never blocks.
+printf '%s\n' "$(date -u +%FT%TZ)" > /tmp/heartbeat.txt
+rc copyto /tmp/heartbeat.txt "${LOG_REMOTE}/heartbeat.txt" >/dev/null 2>&1 || true
+
 attempt=1
 max_attempts=2
 while :; do
