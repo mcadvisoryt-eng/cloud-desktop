@@ -203,28 +203,35 @@ jobs:
           fi
           echo "snapshot heartbeat age: ${hb_age}s"
 
-          now=$(date +%s)
-          gh run list --workflow=desktop.yml --status in_progress \
-              --json databaseId,startedAt,createdAt --limit 20 \
-            --jq '.[] | [.databaseId, (.startedAt // .createdAt)] | @tsv' \
-          | while IFS=$'\t' read -r id started; do
-              [ -n "$id" ] || continue
-              s=$(date -d "$started" +%s 2>/dev/null || echo "$now")
-              age=$(( (now - s) / 60 ))
-              echo "desktop run $id age ${age}m"
-              # Older than the job's own 345m timeout, or silent past two
-              # snapshot intervals: both mean it is not doing useful work.
-              if [ "$age" -ge 340 ] || { [ "$age" -ge 45 ] && [ "$hb_age" -gt 2700 ]; }; then
-                echo "cancelling wedged run $id"
-                gh run cancel "$id" --repo "$GH_REPO" || true
-              fi
-            done
+          # Manage every always-on desktop, not just the Linux one: a Windows
+          # session that dies mid-day otherwise stays dead until its own daily
+          # schedule fires (that is exactly what happened on 2026-10-19).
+          for wf in desktop.yml windows-desktop.yml; do
+            echo "=== $wf ==="
+            now=$(date +%s)
+            gh run list --workflow="$wf" --status in_progress \
+                --json databaseId,startedAt,createdAt --limit 20 \
+              --jq '.[] | [.databaseId, (.startedAt // .createdAt)] | @tsv' \
+            | while IFS=$'\t' read -r id started; do
+                [ -n "$id" ] || continue
+                s=$(date -d "$started" +%s 2>/dev/null || echo "$now")
+                age=$(( (now - s) / 60 ))
+                echo "$wf run $id age ${age}m"
+                # Older than the job's own 345m timeout, or (Linux only — the
+                # heartbeat is written by the Linux snapshot) silent past two
+                # snapshot intervals: it is not doing useful work.
+                if [ "$age" -ge 340 ] || { [ "$wf" = "desktop.yml" ] && [ "$age" -ge 45 ] && [ "$hb_age" -gt 2700 ]; }; then
+                  echo "cancelling wedged $wf run $id"
+                  gh run cancel "$id" --repo "$GH_REPO" || true
+                fi
+              done
 
-          # Always leave exactly one session running or queued.
-          cnt=$(gh run list --workflow=desktop.yml --limit 20 --json status \
-                  --jq '[.[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting")] | length')
-          echo "active/queued desktop runs: $cnt"
-          if [ "$cnt" -eq 0 ]; then
-            echo "no session alive — starting one"
-            gh workflow run desktop.yml --repo "$GH_REPO" || true
-          fi
+            # Leave exactly one session running or queued for each desktop.
+            cnt=$(gh run list --workflow="$wf" --limit 20 --json status \
+                    --jq '[.[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting")] | length')
+            echo "$wf active/queued: $cnt"
+            if [ "$cnt" -eq 0 ]; then
+              echo "no $wf session alive — starting one"
+              gh workflow run "$wf" --repo "$GH_REPO" || true
+            fi
+          done
