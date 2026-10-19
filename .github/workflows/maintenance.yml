@@ -1,8 +1,7 @@
 name: maintenance
 
-# Tailnet housekeeping — because dead runners pile up as `cloudpc-android`,
-# `cloudpc-android-1`, `cloudpc-win-2`, … and then the plain name resolves to a
-# corpse.
+# Tailnet housekeeping — because dead runners pile up as `cloudpc-win-2`,
+# `cloudpc-win-3`, … and then the plain name resolves to a corpse.
 #
 # Requires a Tailscale **API access token** (NOT the auth key — that only joins
 # nodes). Create one: Tailscale admin console -> Settings -> Keys ->
@@ -126,7 +125,7 @@ jobs:
           timeout 60 rclone cat crypt1:home/selftest.log 2>/dev/null | tail -45 || echo "(none yet — the desktop hasn't run the new self-test)"
           echo
           echo "--- sizes ---"
-          for r in crypt1:home crypt1:winhome crypt1:android; do
+          for r in crypt1:home crypt1:winhome; do
             echo -n "$r: "
             timeout 150 rclone size "$r" 2>/dev/null || echo "(could not size — or it timed out)"
           done

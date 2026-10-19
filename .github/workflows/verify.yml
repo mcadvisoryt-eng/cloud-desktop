@@ -7,9 +7,9 @@ name: verify
 # those, never MagicDNS names — joining with --accept-dns=false (so we don't
 # disturb the runner's own DNS) disables MagicDNS resolution, so names fail.
 #
-# It: lists devices, tests TCP reachability, RDPs into the Linux desktop and
-# screenshots what comes back, attaches to the Android emulator over adb and
-# screenshots it, and checks backup freshness. Screenshots are printed as
+# It: lists devices, tests TCP reachability, RDPs into the Linux and Windows
+# desktops and screenshots what comes back, and checks backup freshness.
+# Screenshots are printed as
 # base64 (downscaled) so they can be read from the log without artifacts.
 
 on:
@@ -54,9 +54,8 @@ jobs:
           {
             echo "CP_IP=$(getip cloudpc)"
             echo "CPWIN_IP=$(getip cloudpc-win)"
-            echo "CPAND_IP=$(getip cloudpc-android)"
           } >> "$GITHUB_ENV"
-          echo "resolved: cloudpc=$(getip cloudpc) win=$(getip cloudpc-win) android=$(getip cloudpc-android)"
+          echo "resolved: cloudpc=$(getip cloudpc) win=$(getip cloudpc-win)"
 
       - name: Join the tailnet (temporary, ephemeral)
         env:
@@ -71,7 +70,7 @@ jobs:
       - name: TCP reachability (by IP)
         run: |
           set -x
-          for pair in "cloudpc:${CP_IP}:3389" "cloudpc-win:${CPWIN_IP}:3389" "cloudpc-android:${CPAND_IP}:3389" "cloudpc:${CP_IP}:5555"; do
+          for pair in "cloudpc:${CP_IP}:3389" "cloudpc-win:${CPWIN_IP}:3389"; do
             name="${pair%%:*}"; rest="${pair#*:}"; ip="${rest%%:*}"; port="${rest##*:}"
             echo -n "${name} ${ip}:${port} -> "
             timeout 8 nc -zv "$ip" "$port" 2>&1 | tail -1 || echo "unreachable"
@@ -106,30 +105,6 @@ jobs:
           pkill xfreerdp 2>/dev/null || true
           exit 0
 
-      - name: Android emulator over adb + screenshot (by IP)
-        run: |
-          set -x
-          adb start-server >/dev/null 2>&1 || true
-          SERIAL="${CP_IP}:5555"
-          adb connect "$SERIAL" || true
-          sleep 3
-          adb devices -l || true
-          echo "--- android version ---"; adb -s "$SERIAL" shell getprop ro.build.version.release 2>&1 | head -2 || true
-          echo "--- abilist ---";        adb -s "$SERIAL" shell getprop ro.product.cpu.abilist 2>&1 | head -2 || true
-          echo "--- Play/GSF packages ---"
-          adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -iE 'vending|gms' || echo "(none)"
-          echo "--- screenshot ---"
-          if adb -s "$SERIAL" exec-out screencap -p > /tmp/android.png 2>/tmp/scap.log && [ -s /tmp/android.png ]; then
-            ls -l /tmp/android.png
-            convert /tmp/android.png -resize 720x /tmp/android_small.png 2>/dev/null || cp /tmp/android.png /tmp/android_small.png
-            echo "--- android screenshot base64 begin ---"
-            base64 -w 76 /tmp/android_small.png; echo
-            echo "--- android screenshot base64 end ---"
-          else
-            echo "screencap failed:"; cat /tmp/scap.log || true
-          fi
-          exit 0
-
       - name: Backup freshness
         env:
           RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
@@ -156,7 +131,6 @@ jobs:
           {
             echo "verify run ${GITHUB_RUN_ID} at $(date -u +%FT%TZ)"; echo
             echo "rdp screenshot bytes: $(stat -c%s /tmp/rdp.png 2>/dev/null || echo none)"
-            echo "android screenshot bytes: $(stat -c%s /tmp/android.png 2>/dev/null || echo none)"
             echo; echo "--- newest backup stamps ---"
             timeout 90 rclone lsf --max-depth 1 crypt1:trash 2>/dev/null | sort | tail -5 || true
             echo; echo "--- failure logs ---"
@@ -173,5 +147,4 @@ jobs:
           name: verify-screenshots
           path: |
             /tmp/rdp.png
-            /tmp/android.png
           if-no-files-found: warn
