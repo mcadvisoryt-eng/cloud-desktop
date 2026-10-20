@@ -33,8 +33,11 @@ on:
   # Watchdog: desktop.yml uses concurrency with cancel-in-progress:false, so a
   # session that wedges before its own guard holds the group and blocks every
   # later run. This clears such a session and keeps one session always queued.
+  # GitHub throttles and delays scheduled workflows heavily (in practice this
+  # fired every 4-7 HOURS, not every 30 minutes), so run it as often as
+  # GitHub allows: more chances to notice a dead session despite the delay.
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/10 * * * *'
 
 permissions:
   contents: read
