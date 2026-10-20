@@ -124,6 +124,12 @@ jobs:
           echo "--- desktop self-test log (crypt1:home/selftest.log, written by desktop.yml) ---"
           timeout 60 rclone cat crypt1:home/selftest.log 2>/dev/null | tail -45 || echo "(none yet — the desktop hasn't run the new self-test)"
           echo
+          echo "--- crypt1:logs/selftest-latest.log (pushed by the self-test itself) ---"
+          timeout 60 rclone cat crypt1:logs/selftest-latest.log 2>/dev/null | tail -90 || echo "(none yet)"
+          echo
+          echo "--- crypt1:logs/rdp-desktop-latest.png ---"
+          timeout 60 rclone lsl crypt1:logs/rdp-desktop-latest.png 2>/dev/null || echo "(no screenshot yet)"
+          echo
           echo "--- sizes ---"
           for r in crypt1:home crypt1:winhome; do
             echo -n "$r: "

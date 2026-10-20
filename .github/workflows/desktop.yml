@@ -123,7 +123,7 @@ jobs:
             # session name" and you get a black screen with a Quit button.
             sudo apt-get install -y \
               xfce4 xfce4-session xfconf xfwm4 xfce4-panel xfdesktop4 xfce4-settings \
-              xfce4-terminal thunar xclip xdg-utils \
+              xfce4-terminal thunar xclip xdg-utils icewm \
               xrdp dbus-x11 xorgxrdp \
               libreoffice libreoffice-gtk3 \
               fonts-noto-cjk fonts-noto-color-emoji \
@@ -198,7 +198,28 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
-          exec dbus-launch --exit-with-session /bin/sh -c 'command -v xfconfd >/dev/null 2>&1 && { xfconfd --daemon >/dev/null 2>&1 & sleep 1; }; exec startxfce4'
+          exec dbus-launch --exit-with-session /bin/sh -c '
+            # xfconfd is NOT on PATH (it lives under /usr/lib/xfce4/xfconf/), so a
+            # "command -v xfconfd" guard never fires — and it is D-Bus activation
+            # of xfconfd that was failing. Start it explicitly on the session bus.
+            for x in /usr/lib/xfce4/xfconf/xfconfd /usr/libexec/xfconfd \
+                     /usr/lib/x86_64-linux-gnu/xfce4/xfconf/xfconfd; do
+              if [ -x "$x" ]; then "$x" --daemon >/dev/null 2>&1 & sleep 1; break; fi
+            done
+            # Do NOT run xfce4-session: its failsafe logic is exactly what shows
+            # "Unable to determine failsafe session name". Run the XFCE pieces
+            # directly, and fall back to IceWM if XFCE is not present.
+            if command -v xfwm4 >/dev/null 2>&1; then
+              xfwm4 --daemon >/dev/null 2>&1
+              xfsettingsd >/dev/null 2>&1 &
+              xfce4-panel >/dev/null 2>&1 &
+              xfdesktop >/dev/null 2>&1 &
+              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >/dev/null 2>&1 &
+              wait
+            else
+              exec icewm-session 2>/dev/null || exec icewm
+            fi
+          '
           XSEOF
           sudo chmod +x /home/pc/.xsession
           sudo chown pc:pc /home/pc/.xsession
@@ -222,7 +243,28 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
-          exec dbus-launch --exit-with-session /bin/sh -c 'command -v xfconfd >/dev/null 2>&1 && { xfconfd --daemon >/dev/null 2>&1 & sleep 1; }; exec startxfce4'
+          exec dbus-launch --exit-with-session /bin/sh -c '
+            # xfconfd is NOT on PATH (it lives under /usr/lib/xfce4/xfconf/), so a
+            # "command -v xfconfd" guard never fires — and it is D-Bus activation
+            # of xfconfd that was failing. Start it explicitly on the session bus.
+            for x in /usr/lib/xfce4/xfconf/xfconfd /usr/libexec/xfconfd \
+                     /usr/lib/x86_64-linux-gnu/xfce4/xfconf/xfconfd; do
+              if [ -x "$x" ]; then "$x" --daemon >/dev/null 2>&1 & sleep 1; break; fi
+            done
+            # Do NOT run xfce4-session: its failsafe logic is exactly what shows
+            # "Unable to determine failsafe session name". Run the XFCE pieces
+            # directly, and fall back to IceWM if XFCE is not present.
+            if command -v xfwm4 >/dev/null 2>&1; then
+              xfwm4 --daemon >/dev/null 2>&1
+              xfsettingsd >/dev/null 2>&1 &
+              xfce4-panel >/dev/null 2>&1 &
+              xfdesktop >/dev/null 2>&1 &
+              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >/dev/null 2>&1 &
+              wait
+            else
+              exec icewm-session 2>/dev/null || exec icewm
+            fi
+          '
           STARTWM
           sudo chmod +x /etc/xrdp/startwm.sh
           echo "startwm.sh overridden:"; cat /etc/xrdp/startwm.sh
@@ -388,6 +430,17 @@ jobs:
             echo "=== xfconf dbus service ==="; ls /usr/share/dbus-1/services/ 2>/dev/null | grep -i xfconf || echo "(no xfconf service file)"
             echo "=== ~/.config ==="; ls -la /home/pc/.config 2>/dev/null | head
           } | sudo tee /home/pc/selftest.log >/dev/null 2>&1 || true
+          # Push the diagnostics to Drive immediately, so they can be read even
+          # while this run is still in progress (GitHub only serves logs for
+          # finished runs, and the periodic snapshot is 30 minutes away).
+          if command -v rclone >/dev/null 2>&1 && [ -f "$HOME/.config/rclone/rclone.conf" ]; then
+            sudo cp -f /home/pc/selftest.log /tmp/selftest-copy.log 2>/dev/null || true
+            sudo chmod 644 /tmp/selftest-copy.log 2>/dev/null || true
+            timeout 60 rclone copyto /tmp/selftest-copy.log crypt1:logs/selftest-latest.log 2>/dev/null || true
+            if [ -s /tmp/rdp_local.png ]; then
+              timeout 60 rclone copyto /tmp/rdp_local.png crypt1:logs/rdp-desktop-latest.png 2>/dev/null || true
+            fi
+          fi
           echo "--- local rdp log ---"; cat /tmp/rdp_local.log || true
           echo "--- ~/.xsession-errors (the real error) ---"
           sudo cat /home/pc/.xsession-errors 2>/dev/null | tail -40 || echo "(no .xsession-errors)"
