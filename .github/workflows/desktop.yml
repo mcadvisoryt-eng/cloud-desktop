@@ -209,12 +209,17 @@ jobs:
             # Do NOT run xfce4-session: its failsafe logic is exactly what shows
             # "Unable to determine failsafe session name". Run the XFCE pieces
             # directly, and fall back to IceWM if XFCE is not present.
+            SLOG="$HOME/session.log"
             if command -v xfwm4 >/dev/null 2>&1; then
-              xfwm4 --daemon >/dev/null 2>&1
-              xfsettingsd >/dev/null 2>&1 &
-              xfce4-panel >/dev/null 2>&1 &
-              xfdesktop >/dev/null 2>&1 &
-              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >/dev/null 2>&1 &
+              # NOTE: --daemon was REMOVED from modern xfwm4. Passing it made
+              # xfwm4 exit at once, so there was NO window manager: undecorated,
+              # unplaced windows on a bare black root and no panel.
+              xfwm4 --replace >>"$SLOG" 2>&1 &
+              sleep 2
+              xfsettingsd >>"$SLOG" 2>&1 &
+              xfce4-panel >>"$SLOG" 2>&1 &
+              xfdesktop >>"$SLOG" 2>&1 &
+              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >>"$SLOG" 2>&1 &
               wait
             else
               exec icewm-session 2>/dev/null || exec icewm
@@ -254,12 +259,17 @@ jobs:
             # Do NOT run xfce4-session: its failsafe logic is exactly what shows
             # "Unable to determine failsafe session name". Run the XFCE pieces
             # directly, and fall back to IceWM if XFCE is not present.
+            SLOG="$HOME/session.log"
             if command -v xfwm4 >/dev/null 2>&1; then
-              xfwm4 --daemon >/dev/null 2>&1
-              xfsettingsd >/dev/null 2>&1 &
-              xfce4-panel >/dev/null 2>&1 &
-              xfdesktop >/dev/null 2>&1 &
-              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >/dev/null 2>&1 &
+              # NOTE: --daemon was REMOVED from modern xfwm4. Passing it made
+              # xfwm4 exit at once, so there was NO window manager: undecorated,
+              # unplaced windows on a bare black root and no panel.
+              xfwm4 --replace >>"$SLOG" 2>&1 &
+              sleep 2
+              xfsettingsd >>"$SLOG" 2>&1 &
+              xfce4-panel >>"$SLOG" 2>&1 &
+              xfdesktop >>"$SLOG" 2>&1 &
+              command -v xfce4-terminal >/dev/null 2>&1 && xfce4-terminal >>"$SLOG" 2>&1 &
               wait
             else
               exec icewm-session 2>/dev/null || exec icewm
@@ -429,6 +439,7 @@ jobs:
             echo "=== xfconfd binary ==="; command -v xfconfd || ls -l /usr/lib/xfce4/xfconf/xfconfd 2>/dev/null || echo "(xfconfd not found)"
             echo "=== xfconf dbus service ==="; ls /usr/share/dbus-1/services/ 2>/dev/null | grep -i xfconf || echo "(no xfconf service file)"
             echo "=== ~/.config ==="; ls -la /home/pc/.config 2>/dev/null | head
+            echo "=== ~/session.log (desktop session: WM/panel errors show here) ==="; sudo tail -40 /home/pc/session.log 2>/dev/null || echo "(no session.log)"
           } | sudo tee /home/pc/selftest.log >/dev/null 2>&1 || true
           # Push the diagnostics to Drive immediately, so they can be read even
           # while this run is still in progress (GitHub only serves logs for
