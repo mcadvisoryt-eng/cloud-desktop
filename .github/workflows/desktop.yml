@@ -412,6 +412,12 @@ jobs:
             sudo service xrdp status || true
             exit 1
           fi
+          # Start the session loop NOW, in the background, BEFORE the self-test.
+          # If the self-test stalls, the loop still snapshots, refreshes the
+          # heartbeat and health-checks xrdp. Previously the self-test ran
+          # first and a stall there meant NO snapshots at all.
+          bash "$GITHUB_WORKSPACE/scripts/run-session.sh" &
+          SESSION_PID=$!
           # --- Local RDP self-test: exercise the REAL xrdp login path
           # (startwm.sh -> /etc/X11/Xsession -> ~/.xsession) and dump the
           # session's own error log, the only place the true cause shows up.
@@ -463,7 +469,11 @@ jobs:
             base64 -w 76 /tmp/rdp_local_s.png; echo
             echo "--- local rdp screenshot base64 end ---"
           fi
-          bash "$GITHUB_WORKSPACE/scripts/run-session.sh"
+          # The session loop is started in the BACKGROUND, before the self-test:
+          # if the self-test misbehaves the loop still snapshots, refreshes the
+          # heartbeat and health-checks xrdp. Previously the self-test ran first
+          # and a stall there meant no snapshots at all.
+          wait "$SESSION_PID" || true
 
       - name: Final backup
         if: always()   # even on failure or cancellation — save what we can

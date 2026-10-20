@@ -228,12 +228,18 @@ jobs:
                 # Older than the job's own 345m timeout, or (Linux only — the
                 # heartbeat is written by the Linux snapshot) silent past two
                 # snapshot intervals: it is not doing useful work.
-                if [ "$age" -ge 340 ] || { [ "$wf" = "desktop.yml" ] && [ "$age" -ge 45 ] && [ "$hb_age" -gt 2700 ]; }; then
+                # ONLY the job's own 345m timeout. The heartbeat test was
+                # removed: the heartbeat proved unreliable and it fired on a
+                # HEALTHY 5.4h-old session, so the watchdog killed a live desktop.
+                if [ "$age" -ge 340 ]; then
                   echo "cancelling wedged $wf run $id"
                   gh run cancel "$id" --repo "$GH_REPO" || true
                 fi
               done
 
+            # Give the cancellation a moment to register; otherwise the count
+            # below still sees the run we just cancelled and skips the restart.
+            sleep 20
             # Leave exactly one session running or queued for each desktop.
             cnt=$(gh run list --workflow="$wf" --limit 20 --json status \
                     --jq '[.[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting")] | length')
