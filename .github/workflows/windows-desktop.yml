@@ -159,6 +159,37 @@ jobs:
           Write-Host "  Store-only .msix can be sideloaded: Add-AppxPackage -Path <file>.msix"
           exit 0
 
+      - name: Install Chrome + force-install the Proton VPN extension
+        run: |
+          # Chrome is not on the Server image by default.
+          $chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+          if (-not (Test-Path $chrome)) {
+            Write-Host "Installing Google Chrome via Chocolatey..."
+            choco install googlechrome -y --no-progress 2>&1 | Out-Host
+          }
+          if (Test-Path $chrome) {
+            Write-Host "Chrome present: $((Get-Item $chrome).VersionInfo.ProductVersion)"
+          } else {
+            Write-Host "::warning::Chrome not found after install"
+          }
+
+          # Force-install the official Proton VPN extension (Proton AG, id
+          # jplgfhpmjnbigmhklmmbgecoobifkmpa). Policy-based install means no
+          # clicking, and it applies to every profile. Proton VPN is a Chrome
+          # Web Store extension, so this works even though the runner is not
+          # domain-joined.
+          #
+          # Signing in to Proton is a one-time manual step: that sign-in is
+          # stored in the Chrome profile, which crypt1:winhome backs up and
+          # restores, so it survives across sessions.
+          $key = 'HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist'
+          New-Item -Force -Path $key | Out-Null
+          New-ItemProperty -Path $key -Name '1' -PropertyType String -Force -Value `
+            'jplgfhpmjnbigmhklmmbgecoobifkmpa;https://clients2.google.com/service/update2/crx' | Out-Null
+          Write-Host "--- ExtensionInstallForcelist ---"
+          Get-ItemProperty -Path $key | Select-Object '1' | Format-List
+          exit 0
+
       - name: Install rclone + restore profile from encrypted backup
         env:
           RCLONE_CONFIG_SECRET: ${{ secrets.RCLONE_CONFIG }}
