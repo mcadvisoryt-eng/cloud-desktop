@@ -57,14 +57,21 @@ jobs:
             Write-Host "::warning::RESTART_PAT secret not set — cannot check for duplicates"
             exit 0
           }
-          $running = 0
-          $out = gh run list --workflow=windows-desktop.yml --status in_progress --json databaseId --jq 'length' 2>$null
-          if ($out) { $running = [int]$out }
-          Write-Host "In-progress runs (incl. self): $running"
-          if ($running -gt 1) {
-            Write-Host "Another session is already active. Cancelling this duplicate."
-            gh run cancel $env:GITHUB_RUN_ID --repo $env:GH_REPO 2>$null
-            Start-Sleep -Seconds 15
+          # Keep the NEWEST session and clear OLDER duplicates. This used to
+          # cancel ITSELF, so a fresh run died whenever a stale one was still
+          # winding down — that is how a live desktop disappeared.
+          $me = [long]$env:GITHUB_RUN_ID
+          $ids = gh run list --workflow=windows-desktop.yml --status in_progress --json databaseId --jq '.[].databaseId' 2>$null
+          foreach ($id in $ids) {
+            $n = [long]$id
+            if ($n -lt $me) {
+              Write-Host "cancelling older duplicate $n (keeping $me)"
+              gh run cancel $n --repo $env:GH_REPO 2>$null
+            } elseif ($n -gt $me) {
+              Write-Host "a newer run ($n) exists - this one stands down"
+              gh run cancel $me --repo $env:GH_REPO 2>$null
+              break
+            }
           }
           exit 0
 

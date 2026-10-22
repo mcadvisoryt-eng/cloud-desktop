@@ -64,14 +64,20 @@ jobs:
             echo "::warning::RESTART_PAT secret not set — cannot check for duplicates"
             exit 0
           fi
-          # gh run list includes this very run as in_progress.
-          running=$(gh run list --workflow=desktop.yml --status in_progress --json databaseId --jq 'length' || echo 0)
-          echo "In-progress runs (incl. self): $running"
-          if [ "$running" -gt 1 ]; then
-            echo "Another session is already active. Cancelling this duplicate."
-            gh run cancel "$GITHUB_RUN_ID" --repo "$GH_REPO" || true
-            sleep 15   # give GitHub time to process the cancellation
-          fi
+          # Keep the NEWEST session and clear OLDER duplicates. This used to
+          # cancel ITSELF, so a fresh run died whenever a stale one was still
+          # winding down — that is how a live desktop disappeared.
+          me=$GITHUB_RUN_ID
+          for id in $(gh run list --workflow=desktop.yml --status in_progress --json databaseId --jq '.[].databaseId' || true); do
+            if [ "$id" -lt "$me" ]; then
+              echo "cancelling older duplicate $id (keeping $me)"
+              gh run cancel "$id" --repo "$GH_REPO" || true
+            elif [ "$id" -gt "$me" ]; then
+              echo "a newer run ($id) exists — this one stands down"
+              gh run cancel "$me" --repo "$GH_REPO" || true
+              break
+            fi
+          done
 
       # Reuse the downloaded .deb files from the previous runner. This is the
       # single biggest boot-time win: libreoffice + fonts + xfce4 are large.
