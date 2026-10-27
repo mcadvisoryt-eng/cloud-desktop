@@ -183,6 +183,27 @@ jobs:
           # --- 3. Wait for the package install to finish -------------------
           wait "$APT_PID"
 
+      - name: Audio over RDP (best effort)
+        run: |
+          set -x
+          # xrdp carries sound only via pulseaudio-module-xrdp, which Ubuntu does
+          # not package, so build it. Best-effort: without it the desktop still
+          # works, just silently.
+          sudo apt-get install -y -qq pulseaudio pulseaudio-utils build-essential \
+            libpulse-dev git autoconf libtool libtool-bin pkg-config || true
+          rm -rf /tmp/pamx
+          git clone --depth 1 https://github.com/neutrinolabs/pulseaudio-module-xrdp.git /tmp/pamx || true
+          if [ -d /tmp/pamx ]; then
+            ( cd /tmp/pamx \
+              && ./bootstrap >/dev/null 2>&1 \
+              && ./configure --prefix=/usr >/dev/null 2>&1 \
+              && make -j"$(nproc)" >/dev/null 2>&1 \
+              && sudo make install >/dev/null 2>&1 ) \
+              && echo "pulseaudio-module-xrdp installed — audio over RDP" \
+              || echo "::warning::could not build pulseaudio-module-xrdp (desktop works, no audio)"
+          fi
+          exit 0
+
       - name: Write .xsession (AFTER the restore, which would clobber it)
         run: |
           set -euo pipefail

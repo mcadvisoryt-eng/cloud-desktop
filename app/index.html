@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#120a24">
+<title>cloud-desktop</title>
+<style>
+  :root{
+    --bg:#120a24; --bg2:#0a1c26; --card:#1b1430; --card2:#241a3d;
+    --txt:#ece9f7; --dim:#a79fc4; --ok:#3ddc97; --warn:#ffc857; --bad:#ff6b8a;
+    --accent:#9d7bff; --line:#332a52;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0;padding:20px 16px 40px;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:var(--txt);background:linear-gradient(160deg,var(--bg) 0%,var(--bg2) 100%);min-height:100vh;
+  }
+  header{max-width:640px;margin:0 auto 18px}
+  h1{margin:0 0 4px;font-size:22px;letter-spacing:-.02em}
+  .sub{color:var(--dim);font-size:13px}
+  .wrap{max-width:640px;margin:0 auto;display:grid;gap:14px}
+  .card{
+    background:linear-gradient(180deg,var(--card) 0%,var(--card2) 100%);
+    border:1px solid var(--line);border-radius:18px;padding:16px;
+  }
+  .row{display:flex;align-items:center;gap:10px;justify-content:space-between}
+  .name{font-weight:650;font-size:17px}
+  .host{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
+  .dot{width:9px;height:9px;border-radius:50%;background:#5b5378;flex:0 0 auto}
+  .dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  .dot.wait{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .state{font-size:12.5px;color:var(--dim)}
+  .conn{
+    margin-top:12px;display:flex;gap:8px;align-items:center;
+    background:#0d0a18;border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+    font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#cdc4ea;
+  }
+  .conn span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .btns{display:flex;gap:8px;margin-top:12px}
+  button{
+    flex:1;font:600 14px/1 inherit;color:var(--txt);background:#2c2350;border:1px solid var(--line);
+    border-radius:12px;padding:12px 10px;cursor:pointer;transition:.15s;
+  }
+  button:active{transform:scale(.98)}
+  button.go{background:linear-gradient(135deg,#6d4bff,#9d7bff);border-color:transparent}
+  button.stop{background:#3a1d2c;border-color:#5a2b42;color:#ffb3c6}
+  button:disabled{opacity:.45;cursor:default}
+  .ghost{background:transparent;color:var(--dim)}
+  details{margin-top:6px}
+  summary{color:var(--dim);font-size:13px;cursor:pointer;padding:6px 0}
+  label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
+  input{
+    width:100%;background:#0d0a18;border:1px solid var(--line);border-radius:10px;
+    color:var(--txt);padding:11px 12px;font:14px ui-monospace,Menlo,monospace;
+  }
+  .note{color:var(--dim);font-size:12px;margin-top:10px;line-height:1.5}
+  .toast{
+    position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(80px);
+    background:#2c2350;border:1px solid var(--line);color:var(--txt);
+    padding:11px 16px;border-radius:12px;font-size:13.5px;opacity:0;transition:.25s;pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <h1>cloud-desktop</h1>
+  <div class="sub">One tap to start a desktop · RDP user <b>pc</b></div>
+</header>
+
+<div class="wrap">
+  <div class="card" id="card-linux">
+    <div class="row">
+      <div>
+        <div class="name">Linux</div>
+        <div class="host">cloudpc:3389</div>
+      </div>
+      <div class="row" style="gap:7px">
+        <div class="dot" id="dot-linux"></div>
+        <div class="state" id="state-linux">checking…</div>
+      </div>
+    </div>
+    <div class="conn"><span id="conn-linux">cloudpc:3389</span><button class="ghost" style="flex:0 0 auto;padding:8px 10px" data-copy="cloudpc:3389">Copy</button></div>
+    <div class="btns">
+      <button class="go" id="go-linux">Start</button>
+      <button class="stop" id="stop-linux" disabled>Stop</button>
+    </div>
+  </div>
+
+  <div class="card" id="card-win">
+    <div class="row">
+      <div>
+        <div class="name">Windows</div>
+        <div class="host">cloudpc-win:3389</div>
+      </div>
+      <div class="row" style="gap:7px">
+        <div class="dot" id="dot-win"></div>
+        <div class="state" id="state-win">checking…</div>
+      </div>
+    </div>
+    <div class="conn"><span id="conn-win">cloudpc-win:3389</span><button class="ghost" style="flex:0 0 auto;padding:8px 10px" data-copy="cloudpc-win:3389">Copy</button></div>
+    <div class="btns">
+      <button class="go" id="go-win">Start</button>
+      <button class="stop" id="stop-win" disabled>Stop</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Settings</summary>
+      <label for="repo">Repository (owner/name)</label>
+      <input id="repo" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+      <label for="token">Fine-grained token — Actions: read and write</label>
+      <input id="token" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false">
+      <div class="note">
+        Stored only in this browser's localStorage and sent only to api.github.com.
+        It needs no other permission. If it leaks, revoke it — it can do nothing
+        but start and stop these workflows.
+      </div>
+    </details>
+    <div class="note" id="hint">Set the repository and token above to enable the buttons.</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const WORKFLOWS = {
+  linux: { wf: 'desktop.yml',         host: 'cloudpc' },
+  win:   { wf: 'windows-desktop.yml', host: 'cloudpc-win' },
+};
+const API = 'https://api.github.com';
+const $ = id => document.getElementById(id);
+
+const store = {
+  get repo(){ return localStorage.getItem('cd.repo') || ''; },
+  set repo(v){ localStorage.setItem('cd.repo', v.trim()); },
+  get token(){ return localStorage.getItem('cd.token') || ''; },
+  set token(v){ localStorage.setItem('cd.token', v.trim()); },
+};
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+async function gh(path, opts = {}){
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': 'Bearer ' + store.token,
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 204) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || ('HTTP ' + res.status));
+  return body;
+}
+
+const ready = () => Boolean(store.repo && store.token && store.repo.includes('/'));
+
+function paint(key, runs){
+  const live = runs.find(r => ['in_progress','queued','pending','waiting'].includes(r.status));
+  const dot = $('dot-' + key), state = $('state-' + key);
+  const go = $('go-' + key), stop = $('stop-' + key);
+
+  dot.className = 'dot';
+  if (!live){
+    state.textContent = runs[0] ? 'offline · last ' + runs[0].conclusion : 'offline';
+    go.disabled = !ready(); stop.disabled = true;
+    return;
+  }
+  if (live.status === 'in_progress'){
+    const mins = Math.max(0, Math.round((Date.now() - new Date(live.created_at)) / 60000));
+    dot.classList.add('on');
+    state.textContent = 'live · ' + mins + 'm';
+    stop.disabled = !ready();
+  } else {
+    dot.classList.add('wait');
+    state.textContent = 'starting…';
+    stop.disabled = !ready();
+  }
+  go.disabled = true;
+}
+
+async function refresh(){
+  if (!ready()){
+    for (const k of Object.keys(WORKFLOWS)){
+      $('state-' + k).textContent = 'not configured';
+      $('go-' + k).disabled = true; $('stop-' + k).disabled = true;
+    }
+    return;
+  }
+  for (const [key, cfg] of Object.entries(WORKFLOWS)){
+    try {
+      const data = await gh(`/repos/${store.repo}/actions/workflows/${cfg.wf}/runs?per_page=5`);
+      paint(key, data.workflow_runs || []);
+    } catch (e){
+      $('state-' + key).textContent = 'error';
+      $('dot-' + key).className = 'dot';
+    }
+  }
+}
+
+async function start(key){
+  const cfg = WORKFLOWS[key];
+  try {
+    await gh(`/repos/${store.repo}/actions/workflows/${cfg.wf}/dispatches`, {
+      method: 'POST',
+      body: JSON.stringify({ ref: 'main' }),
+    });
+    toast('Starting ' + cfg.host + '…');
+    setTimeout(refresh, 4000);
+  } catch (e){ toast('Could not start: ' + e.message); }
+}
+
+async function stop(key){
+  const cfg = WORKFLOWS[key];
+  try {
+    const data = await gh(`/repos/${store.repo}/actions/workflows/${cfg.wf}/runs?per_page=10`);
+    const live = (data.workflow_runs || []).find(r => ['in_progress','queued','pending','waiting'].includes(r.status));
+    if (!live){ toast('Nothing running.'); return; }
+    await gh(`/repos/${store.repo}/actions/runs/${live.id}/cancel`, { method: 'POST' });
+    toast('Stopping ' + cfg.host + '…');
+    setTimeout(refresh, 4000);
+  } catch (e){ toast('Could not stop: ' + e.message); }
+}
+
+document.querySelectorAll('[data-copy]').forEach(b => {
+  b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied ' + b.dataset.copy); }
+    catch { toast(b.dataset.copy); }
+  });
+});
+
+$('repo').value = store.repo;
+$('token').value = store.token;
+$('repo').addEventListener('change', e => { store.repo = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.'; refresh(); });
+$('token').addEventListener('change', e => { store.token = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.'; refresh(); });
+$('go-linux').addEventListener('click', () => start('linux'));
+$('go-win').addEventListener('click', () => start('win'));
+$('stop-linux').addEventListener('click', () => stop('linux'));
+$('stop-win').addEventListener('click', () => stop('win'));
+
+$('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.';
+refresh();
+setInterval(refresh, 20000);
+</script>
+</body>
+</html>

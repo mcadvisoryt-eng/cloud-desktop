@@ -227,6 +227,14 @@ jobs:
             Write-Host "dark theme + wallpaper applied to the default profile"
           } catch { Write-Host "::warning::could not theme the default profile" }
 
+          # --- winutil's Standard preset: an unattended, curated debloat ----
+          # Borrowed from ChrisTitusTech/winutil (MIT). Best-effort: it targets
+          # Windows 10/11, so on Server a few items are no-ops.
+          try {
+            Write-Host "applying the winutil Standard preset ..."
+            & ([ScriptBlock]::Create((irm https://christitus.com/win))) -Preset Standard
+          } catch { Write-Host "::warning::winutil preset did not complete (expected on Server)" }
+
           # --- a real Start menu, and apps worth having ---------------------
           foreach ($pkg in 'open-shell','7zip','notepadplusplus','vlc','discord','spotify') {
             try {
