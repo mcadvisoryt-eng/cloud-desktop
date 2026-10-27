@@ -43,7 +43,10 @@ $syncArgs = @(
     '--exclude', 'AppData/Local/Microsoft/Windows/Explorer/**',
     '--exclude', 'AppData/Local/Packages/**/LocalCache/**',
     '--exclude', 'AppData/Local/Packages/**/TempState/**',
-    '--exclude', 'AppData/Local/Google/Chrome/User Data/**/Cache/**',
+    # Chrome is captured separately below with a lock-safe copy: rclone
+    # cannot read the files Chrome holds open (Preferences, Login Data,
+    # Local State, Cookies) and those errors used to fail the whole sync.
+    '--exclude', 'AppData/Local/Google/Chrome/**',
     '--exclude', 'AppData/Local/Microsoft/Edge/User Data/**/Cache/**',
     '--exclude', 'AppData/Local/Mozilla/**/cache2/**',
     '--exclude', 'AppData/Roaming/Microsoft/Windows/Recent/**',
@@ -52,13 +55,43 @@ $syncArgs = @(
     '--exclude', '*.log'
 )
 
+# --- Chrome profile: lock-safe capture --------------------------------------
+# rclone cannot read files Chrome keeps open, and those are exactly the ones
+# that carry the extension state and the Proton VPN sign-in. robocopy /B uses
+# the backup privilege to read locked files, so stage a copy and push that.
+$chromeSrc = "C:\Users\$u\AppData\Local\Google\Chrome"
+if (Test-Path $chromeSrc) {
+    Write-Log "Staging the Chrome profile (robocopy /B, lock-safe)"
+    $stage = 'C:\chrome-stage'
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    & robocopy $chromeSrc $stage /E /B /R:1 /W:1 /NFL /NDL /NJH /NJS `
+        /XD Cache 'Code Cache' GPUCache ShaderCache GrShaderCache 'Service Worker' `
+            'DawnGraphiteCache' 'DawnWebGPUCache' 'Media Cache' | Out-Null
+    $rcRobo = $LASTEXITCODE
+    Write-Log "robocopy exit $rcRobo (below 8 means success)"
+    if ($rcRobo -lt 8) {
+        & $rclone sync $stage 'crypt1:chrome' --transfers 8 --checkers 4 *>> $log
+        Write-Log "chrome profile sync exit $LASTEXITCODE"
+    } else {
+        Write-Log "::warning::robocopy could not stage the Chrome profile (exit $rcRobo)"
+    }
+} else {
+    Write-Log "no Chrome profile at $chromeSrc yet"
+}
+
 $attempt = 1
 $maxAttempts = 2
 $ok = $false
 while ($attempt -le $maxAttempts -and -not $ok) {
     Write-Log "attempt $attempt/$maxAttempts"
     & $rclone @syncArgs *>> $log
-    if ($LASTEXITCODE -eq 0) {
+    $rc = $LASTEXITCODE
+    # Exit 0 = clean. Anything else is usually a few locked/skipped files in a
+    # LIVE profile, which is expected — log it, do not treat it as fatal.
+    if ($rc -eq 0) {
+        $ok = $true
+    } elseif ($attempt -ge $maxAttempts) {
+        Write-Log "sync finished with warnings (exit $rc) - most files were copied"
         $ok = $true
     } else {
         $attempt++

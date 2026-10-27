@@ -189,12 +189,29 @@ jobs:
           # Signing in to Proton is a one-time manual step: that sign-in is
           # stored in the Chrome profile, which crypt1:winhome backs up and
           # restores, so it survives across sessions.
+          # Daily-driver extensions, force-installed by policy. Their settings
+          # and sign-ins live in the Chrome profile, which crypt1:chrome backs
+          # up and restores, so they survive the session handover.
+          $exts = @(
+            'jplgfhpmjnbigmhklmmbgecoobifkmpa',  # Proton VPN (Proton AG)
+            'cjpalhdlnbpafiamejdnhcphjbkeiagm',  # uBlock Origin (Raymond Hill)
+            'nngceckbapebfimnlniiiahkandclblb',  # Bitwarden Password Manager
+            'eimadpbcbfnmbkopoojfekhnkhdbieeh',  # Dark Reader
+            'mnjggcdmjocbbbhaepdhchncahnbgone'   # SponsorBlock for YouTube
+          )
           $key = 'HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist'
           New-Item -Force -Path $key | Out-Null
-          New-ItemProperty -Path $key -Name '1' -PropertyType String -Force -Value `
-            'jplgfhpmjnbigmhklmmbgecoobifkmpa;https://clients2.google.com/service/update2/crx' | Out-Null
+          # Rewrite the list from scratch so it is exactly the set above.
+          Get-Item $key | Select-Object -ExpandProperty Property -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-ItemProperty -Path $key -Name $_ -ErrorAction SilentlyContinue }
+          $i = 1
+          foreach ($e in $exts) {
+            New-ItemProperty -Path $key -Name "$i" -PropertyType String -Force `
+              -Value "$e;https://clients2.google.com/service/update2/crx" | Out-Null
+            $i++
+          }
           Write-Host "--- ExtensionInstallForcelist ---"
-          Get-ItemProperty -Path $key | Select-Object '1' | Format-List
+          Get-ItemProperty -Path $key | Format-List
           exit 0
 
       - name: Install rclone + restore profile from encrypted backup
@@ -229,6 +246,17 @@ jobs:
             $rc = $LASTEXITCODE
           } else {
             Write-Host "::warning::RCLONE_CONFIG missing or has no 'crypt1' remote — starting with a blank profile"
+          }
+          # The Chrome profile is captured separately (lock-safe robocopy stage,
+          # see windows-snapshot.ps1), so restore it on top of the home profile.
+          if ("$(& 'C:\rclone\rclone.exe' lsf crypt1:chrome --max-depth 1 2>$null)") {
+            Write-Host "Restoring the Chrome profile from crypt1:chrome ..."
+            & 'C:\rclone\rclone.exe' copy 'crypt1:chrome/' `
+              "C:\Users\$env:RDP_USER\AppData\Local\Google\Chrome" `
+              --transfers 16 --checkers 16 --stats 30s --stats-one-line
+            Write-Host "chrome restore exit $LASTEXITCODE"
+          } else {
+            Write-Host "no Chrome profile in crypt1:chrome yet — starting fresh"
           }
           # rclone exits non-zero for locked/skipped files, which is normal for a
           # live profile — don't fail the run over it.
