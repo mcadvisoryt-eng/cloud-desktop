@@ -79,6 +79,26 @@ if (Test-Path $chromeSrc) {
     Write-Log "no Chrome profile at $chromeSrc yet"
 }
 
+# --- profile hive: the piece that makes the folder a real profile ----------
+# NTUSER.DAT is locked while the user is logged in, so rclone cannot read it.
+# robocopy /B can, and without it the restore produces a folder Windows will
+# not adopt (it hangs in the User Profile Service).
+$hiveSrc = "C:\Users\$u\NTUSER.DAT"
+if (Test-Path $hiveSrc) {
+    Write-Log "Capturing the profile hive (robocopy /B)"
+    $hiveStage = 'C:\hive-stage'
+    Remove-Item $hiveStage -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $hiveStage | Out-Null
+    & robocopy "C:\Users\$u" $hiveStage 'NTUSER.DAT' /B /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+    Write-Log "hive robocopy exit $LASTEXITCODE (below 8 means success)"
+    if ($LASTEXITCODE -lt 8) {
+        & $rclone copyto (Join-Path $hiveStage 'NTUSER.DAT') 'crypt1:winhive/NTUSER.DAT' *>> $log
+        Write-Log "hive upload exit $LASTEXITCODE"
+    }
+} else {
+    Write-Log "no NTUSER.DAT yet (the profile has never been logged into)"
+}
+
 $attempt = 1
 $maxAttempts = 2
 $ok = $false

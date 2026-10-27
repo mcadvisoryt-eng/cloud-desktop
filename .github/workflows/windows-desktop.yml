@@ -211,21 +211,28 @@ jobs:
             Write-Host "wallpaper: $wp"
           } catch { Write-Host "::warning::wallpaper generation failed" }
 
-          # Apply dark theme + wallpaper to the DEFAULT profile, so the 'pc'
-          # account inherits it on first logon (HKCU here would be the runner's).
+          # Apply the theme at 'pc' logon via a scheduled task. We deliberately
+          # do NOT load the Default user hive: loading it left it locked and made
+          # the "User Profile Service" hang at first logon.
+          $wp = 'C:\Users\Public\wallpaper.png'
+          $script = @"
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -Value 0 -Type DWord -Force
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name SystemUsesLightTheme -Value 0 -Type DWord -Force
+          New-Item -Force -Path 'HKCU:\Control Panel\Desktop' | Out-Null
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -Value '$wp' -Force
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10' -Force
+          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0' -Force
+          RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
+          "@
           try {
-            reg load 'HKU\DefaultUser' 'C:\Users\Default\NTUSER.DAT' | Out-Null
-            $p = 'HKU:\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-            New-Item -Force -Path $p | Out-Null
-            Set-ItemProperty -Path $p -Name AppsUseLightTheme   -Value 0 -Type DWord -Force
-            Set-ItemProperty -Path $p -Name SystemUsesLightTheme -Value 0 -Type DWord -Force
-            $d = 'HKU:\DefaultUser\Control Panel\Desktop'
-            Set-ItemProperty -Path $d -Name Wallpaper      -Value $wp   -Force
-            Set-ItemProperty -Path $d -Name WallpaperStyle -Value '10'  -Force
-            Set-ItemProperty -Path $d -Name TileWallpaper  -Value '0'   -Force
-            reg unload 'HKU\DefaultUser' | Out-Null
-            Write-Host "dark theme + wallpaper applied to the default profile"
-          } catch { Write-Host "::warning::could not theme the default profile" }
+            Set-Content -Path 'C:\Users\Public\apply-theme.ps1' -Value $script -Encoding UTF8
+            $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
+              -Argument '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Users\Public\apply-theme.ps1'
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:RDP_USER"
+            Register-ScheduledTask -TaskName 'ApplyCloudDesktopTheme' -Action $action `
+              -Trigger $trigger -RunLevel Highest -Force | Out-Null
+            Write-Host "theme task registered (runs at $env:RDP_USER logon)"
+          } catch { Write-Host "::warning::could not register the theme task" }
 
           # --- winutil's Standard preset: an unattended, curated debloat ----
           # Borrowed from ChrisTitusTech/winutil (MIT). Best-effort: it targets
@@ -336,6 +343,33 @@ jobs:
           } else {
             Write-Host "no Chrome profile in crypt1:chrome yet — starting fresh"
           }
+          # The profile hive is captured separately (robocopy /B, see
+          # windows-snapshot.ps1) because rclone cannot read it while logged in.
+          if ("$(& 'C:\rclone\rclone.exe' lsf crypt1:winhive --max-depth 1 2>$null)") {
+            Write-Host "Restoring the profile hive from crypt1:winhive ..."
+            & 'C:\rclone\rclone.exe' copyto 'crypt1:winhive/NTUSER.DAT' (Join-Path $profileDir 'NTUSER.DAT')
+            Write-Host "hive restore exit $LASTEXITCODE"
+          } else {
+            Write-Host "no profile hive in crypt1:winhive yet"
+          }
+
+          # A folder without NTUSER.DAT is NOT a profile: Windows then tries to
+          # adopt it and hangs in the User Profile Service. So only keep the
+          # restored folder when the hive came back with it.
+          $hive = Join-Path $profileDir 'NTUSER.DAT'
+          if (Test-Path $hive) {
+            try {
+              $sid = (Get-LocalUser -Name $env:RDP_USER).SID.Value
+              $pl  = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid"
+              New-Item -Force -Path $pl | Out-Null
+              Set-ItemProperty -Path $pl -Name ProfileImagePath -Value $profileDir -Force
+              Write-Host "profile hive present — ProfileList points at $profileDir"
+            } catch { Write-Host "::warning::could not set the ProfileList entry" }
+          } else {
+            Write-Host "::warning::no NTUSER.DAT in the backup — clearing $profileDir so Windows creates a clean profile"
+            Remove-Item $profileDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
           # rclone exits non-zero for locked/skipped files, which is normal for a
           # live profile — don't fail the run over it.
           if ($rc -ne 0) { Write-Host "::warning::rclone restore finished with warnings (exit $rc)" }
