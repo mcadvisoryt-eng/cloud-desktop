@@ -327,6 +327,9 @@ jobs:
 
       - name: Tune xrdp + XFCE for lowest latency
         run: |
+          # Clock in IST, so the desktop matches the user's locale.
+          sudo timedatectl set-timezone Asia/Kolkata 2>/dev/null || true
+          sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime 2>/dev/null || true
           set -euo pipefail
 
           # ---- 1. Prefer RemoteFX over H.264 --------------------------------

@@ -166,6 +166,76 @@ jobs:
           Write-Host "  Store-only .msix can be sideloaded: Add-AppxPackage -Path <file>.msix"
           exit 0
 
+      - name: Customise the desktop (IST clock, smoothness, theme, apps)
+        run: |
+          # --- clock: IST ---------------------------------------------------
+          try {
+            Set-TimeZone -Id 'India Standard Time'
+            Write-Host "timezone: $((Get-TimeZone).DisplayName)"
+          } catch { Write-Host "::warning::could not set the timezone" }
+
+          # --- smoothness: the Server annoyances that make it feel wrong ----
+          # IE Enhanced Security Configuration blocks ordinary browsing.
+          foreach ($guid in '{A509B1A7-37EF-4b3f-8CFC-4F3A74704073}','{A509B1A8-37EF-4b3f-8CFC-4F3A74704073}') {
+            try {
+              $k = "HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\$guid"
+              if (Test-Path $k) { Set-ItemProperty -Path $k -Name IsInstalled -Value 0 -Force }
+            } catch {}
+          }
+          # Stop Server Manager opening at every logon.
+          try { New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ServerManager' -Name DoNotOpenServerManagerAtLogon -PropertyType DWord -Value 1 -Force | Out-Null } catch {}
+          # Telemetry services off (smoothness, not security).
+          foreach ($svc in 'DiagTrack','dmwappushservice') {
+            try { Stop-Service $svc -Force -ErrorAction SilentlyContinue; Set-Service $svc -StartupType Disabled -ErrorAction SilentlyContinue } catch {}
+          }
+          # Hibernation file off -> less disk churn.
+          try { powercfg /hibernate off } catch {}
+
+          # --- aesthetic: wallpaper (generated, so no licensing question) ---
+          $wp = 'C:\Users\Public\wallpaper.png'
+          try {
+            Add-Type -AssemblyName System.Drawing
+            $bmp = New-Object System.Drawing.Bitmap(1920,1080)
+            $g   = [System.Drawing.Graphics]::FromImage($bmp)
+            $rect = New-Object System.Drawing.Rectangle(0,0,1920,1080)
+            $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, `
+                    [System.Drawing.Color]::FromArgb(18,10,36), [System.Drawing.Color]::FromArgb(6,54,70), 45)
+            $g.FillRectangle($br, $rect)
+            for ($i=0; $i -lt 3; $i++) {
+              $b2 = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(30-($i*9), 150, 120, 255))
+              $d  = 560 - ($i*130)
+              $g.FillEllipse($b2, 1150-($i*70), 100+($i*150), $d, $d)
+            }
+            $bmp.Save($wp, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+            Write-Host "wallpaper: $wp"
+          } catch { Write-Host "::warning::wallpaper generation failed" }
+
+          # Apply dark theme + wallpaper to the DEFAULT profile, so the 'pc'
+          # account inherits it on first logon (HKCU here would be the runner's).
+          try {
+            reg load 'HKU\DefaultUser' 'C:\Users\Default\NTUSER.DAT' | Out-Null
+            $p = 'HKU:\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+            New-Item -Force -Path $p | Out-Null
+            Set-ItemProperty -Path $p -Name AppsUseLightTheme   -Value 0 -Type DWord -Force
+            Set-ItemProperty -Path $p -Name SystemUsesLightTheme -Value 0 -Type DWord -Force
+            $d = 'HKU:\DefaultUser\Control Panel\Desktop'
+            Set-ItemProperty -Path $d -Name Wallpaper      -Value $wp   -Force
+            Set-ItemProperty -Path $d -Name WallpaperStyle -Value '10'  -Force
+            Set-ItemProperty -Path $d -Name TileWallpaper  -Value '0'   -Force
+            reg unload 'HKU\DefaultUser' | Out-Null
+            Write-Host "dark theme + wallpaper applied to the default profile"
+          } catch { Write-Host "::warning::could not theme the default profile" }
+
+          # --- a real Start menu, and apps worth having ---------------------
+          foreach ($pkg in 'open-shell','7zip','notepadplusplus','vlc','discord','spotify') {
+            try {
+              Write-Host "installing $pkg ..."
+              choco install $pkg -y --no-progress --limit-output 2>&1 | Select-Object -Last 2 | Out-Host
+            } catch { Write-Host "::warning::could not install $pkg" }
+          }
+          exit 0
+
       - name: Install Chrome + force-install the Proton VPN extension
         run: |
           # Chrome is not on the Server image by default.
