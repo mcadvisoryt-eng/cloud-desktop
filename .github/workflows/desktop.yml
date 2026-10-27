@@ -23,6 +23,12 @@ name: cloud-desktop
 on:
   workflow_dispatch:
     inputs:
+      desktop:
+        description: 'Desktop environment (xfce = known good, lxde = lighter)'
+        required: false
+        default: 'xfce'
+        type: choice
+        options: [xfce, lxde]
       session_minutes:
         description: 'Session length in minutes (set 2 for a quick diagnostic run)'
         required: false
@@ -47,6 +53,7 @@ jobs:
     env:
       SESSION_MINUTES: ${{ github.event.inputs.session_minutes || '330' }}
       SNAPSHOT_EVERY_MIN: '30'
+      DESKTOP_CHOICE: ${{ github.event.inputs.desktop || 'xfce' }}
       REMOTE: 'crypt1:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
       TRASH_REMOTE: 'crypt1:trash'   # 7-day recoverable deletions
       TS_HOSTNAME: 'cloudpc'
@@ -129,7 +136,7 @@ jobs:
             # session name" and you get a black screen with a Quit button.
             sudo apt-get install -y \
               xfce4 xfce4-session xfconf xfwm4 xfce4-panel xfdesktop4 xfce4-settings \
-              xfce4-terminal thunar xclip xdg-utils icewm \
+              xfce4-terminal thunar xclip xdg-utils icewm lxde \
               xrdp dbus-x11 xorgxrdp \
               libreoffice libreoffice-gtk3 \
               fonts-noto-cjk fonts-noto-color-emoji \
@@ -226,6 +233,11 @@ jobs:
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
           exec dbus-launch --exit-with-session /bin/sh -c '
+            # Honour the desktop chosen at dispatch time. xfce is the default and
+            # the known-good path; lxde is the lighter option.
+            if [ "$(cat /etc/xrdp/desktop-choice 2>/dev/null)" = "lxde" ]; then
+              exec startlxde
+            fi
             # xfconfd is NOT on PATH (it lives under /usr/lib/xfce4/xfconf/), so a
             # "command -v xfconfd" guard never fires — and it is D-Bus activation
             # of xfconfd that was failing. Start it explicitly on the session bus.
@@ -253,6 +265,10 @@ jobs:
             fi
           '
           XSEOF
+          # Record the chosen desktop where startwm.sh can read it (the heredocs
+          # are quoted, so the value is written at generation time).
+          echo "${DESKTOP_CHOICE:-xfce}" | sudo tee /etc/xrdp/desktop-choice >/dev/null
+          sudo chmod 644 /etc/xrdp/desktop-choice
           sudo chmod +x /home/pc/.xsession
           sudo chown pc:pc /home/pc/.xsession
           # A stale restored XFCE/xfconf config can also make the session abort.
@@ -276,6 +292,11 @@ jobs:
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           xset s off -dpms 2>/dev/null || true
           exec dbus-launch --exit-with-session /bin/sh -c '
+            # Honour the desktop chosen at dispatch time. xfce is the default and
+            # the known-good path; lxde is the lighter option.
+            if [ "$(cat /etc/xrdp/desktop-choice 2>/dev/null)" = "lxde" ]; then
+              exec startlxde
+            fi
             # xfconfd is NOT on PATH (it lives under /usr/lib/xfce4/xfconf/), so a
             # "command -v xfconfd" guard never fires — and it is D-Bus activation
             # of xfconfd that was failing. Start it explicitly on the session bus.
