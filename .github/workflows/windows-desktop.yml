@@ -279,7 +279,7 @@ jobs:
           # up and restores, so they survive the session handover.
           $exts = @(
             'jplgfhpmjnbigmhklmmbgecoobifkmpa',  # Proton VPN (Proton AG)
-            'cjpalhdlnbpafiamejdnhcphjbkeiagm',  # uBlock Origin (Raymond Hill)
+            'ddkjiahejlhfcafbddmgiahcphecmpfh',  # uBlock Origin Lite (MV3; MV2 build delisted)
             'nngceckbapebfimnlniiiahkandclblb',  # Bitwarden Password Manager
             'eimadpbcbfnmbkopoojfekhnkhdbieeh',  # Dark Reader
             'mnjggcdmjocbbbhaepdhchncahnbgone'   # SponsorBlock for YouTube
@@ -295,6 +295,17 @@ jobs:
               -Value "$e;https://clients2.google.com/service/update2/crx" | Out-Null
             $i++
           }
+          # Pin the icons to the toolbar (otherwise they hide behind the
+          # puzzle-piece menu). Dictionary policies go in as a JSON REG_SZ.
+          try {
+            $settings = @{}
+            foreach ($e in $exts) { $settings[$e] = @{ toolbar_pin = 'force_pinned' } }
+            New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome' `
+              -Name 'ExtensionSettings' -PropertyType String -Force `
+              -Value ($settings | ConvertTo-Json -Compress -Depth 5) | Out-Null
+            Write-Host "extension icons pinned to the toolbar"
+          } catch { Write-Host "::warning::could not set ExtensionSettings" }
+
           Write-Host "--- ExtensionInstallForcelist ---"
           Get-ItemProperty -Path $key | Format-List
           exit 0
