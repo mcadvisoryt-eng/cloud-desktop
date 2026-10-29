@@ -24,6 +24,16 @@ if (-not (Test-Path $conf)) {
 }
 $env:RCLONE_CONFIG = $conf
 
+function Notify([string]$title, [string]$tags, [string]$priority, [string]$msg) {
+    # ntfy push (https://ntfy.sh). No-op unless NTFY_TOPIC is set.
+    if (-not $env:NTFY_TOPIC) { return }
+    try {
+        $body = [Text.Encoding]::UTF8.GetBytes($msg)
+        Invoke-RestMethod -Uri "https://ntfy.sh/$($env:NTFY_TOPIC)" -Method Post -Body $body `
+            -Headers @{ Title = $title; Tags = $tags; Priority = $priority } -TimeoutSec 15 | Out-Null
+    } catch {}
+}
+
 function Write-Log([string]$m) {
     $line = "[{0}] {1}" -f (Get-Date).ToUniversalTime().ToString('HH:mm:ss'), $m
     Write-Host $line
@@ -36,7 +46,7 @@ Write-Log "Snapshotting $src -> $remote (trash: $trash/$stamp)"
 
 $syncArgs = @(
     'sync', $src, $remote, '--backup-dir', "$trash/$stamp",
-    '--transfers', '8', '--checkers', '4', '--fast-list', '--stats', '30s', '--stats-one-line',
+    '--transfers', '8', '--checkers', '4', '--fast-list', '--checksum', '--stats', '30s', '--stats-one-line',
     '--exclude', 'AppData/Local/Temp/**',
     '--exclude', 'AppData/Local/Microsoft/Windows/INetCache/**',
     '--exclude', 'AppData/Local/Microsoft/Windows/WebCache/**',
@@ -121,12 +131,19 @@ while ($attempt -le $maxAttempts -and -not $ok) {
 
 if ($ok) {
     Write-Log "Snapshot complete."
+    $changed = ''
+    try {
+        $m = Select-String -Path $log -Pattern 'Transferred:\s+(\d+)' -AllMatches | Select-Object -Last 1
+        if ($m) { $changed = $m.Matches[-1].Groups[1].Value }
+    } catch {}
+    Notify "Windows backup ok" "white_check_mark" "default" "$($env:COMPUTERNAME): $($changed) file(s) changed, synced to $remote"
     # Prune trash older than 7 days (best-effort).
     & $rclone delete --min-age 7d $trash *>> $log 2>$null
     exit 0
 }
 
 Write-Log "snapshot FAILED after $($attempt - 1) attempts"
+Notify "Windows backup FAILED" "x" "high" "$($env:COMPUTERNAME): snapshot failed after $($attempt - 1) attempts — see $logRemote/windows-backup-$stamp.log"
 Write-Log "uploading this log to $logRemote/windows-backup-$stamp.log and continuing WITHOUT blocking the session"
 & $rclone copyto $log "$logRemote/windows-backup-$stamp.log" *>> $log 2>$null
 if ($LASTEXITCODE -ne 0) { Write-Host "::warning::could not upload the backup log to $logRemote" }
