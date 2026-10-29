@@ -24,9 +24,13 @@ if (-not (Test-Path $conf)) {
 }
 $env:RCLONE_CONFIG = $conf
 
+# Fixed default topic, so notifications work out of the box. Override any time
+# by setting the NTFY_TOPIC secret; this value stays put until you change it.
+if (-not $env:NTFY_TOPIC) { $env:NTFY_TOPIC = 'cloudpc-2c50b2a3b2ba989d' }
+
 function Notify([string]$title, [string]$tags, [string]$priority, [string]$msg) {
-    # ntfy push (https://ntfy.sh). No-op unless NTFY_TOPIC is set.
-    if (-not $env:NTFY_TOPIC) { Write-Log "ntfy skipped: NTFY_TOPIC is not set"; return }
+    # ntfy push (https://ntfy.sh).
+    if (-not $env:NTFY_TOPIC) { Write-Log "ntfy skipped: no topic"; return }
     try {
         $body = [Text.Encoding]::UTF8.GetBytes($msg)
         Invoke-RestMethod -Uri "https://ntfy.sh/$($env:NTFY_TOPIC)" -Method Post -Body $body `
@@ -144,6 +148,7 @@ while ($attempt -le $maxAttempts -and -not $ok) {
 
 if ($ok) {
     Write-Log "Snapshot complete."
+    & $rclone copyto $log "$logRemote/windows-backup-latest.log" *>> $log 2>$null
     $changed = ''
     try {
         $m = Select-String -Path $log -Pattern 'Transferred:\s+(\d+)' -AllMatches | Select-Object -Last 1
@@ -159,6 +164,7 @@ Write-Log "snapshot FAILED after $($attempt - 1) attempts"
 Notify "Windows backup FAILED" "x" "high" "$($env:COMPUTERNAME): snapshot failed after $($attempt - 1) attempts — see $logRemote/windows-backup-$stamp.log"
 Write-Log "uploading this log to $logRemote/windows-backup-$stamp.log and continuing WITHOUT blocking the session"
 & $rclone copyto $log "$logRemote/windows-backup-$stamp.log" *>> $log 2>$null
+& $rclone copyto $log "$logRemote/windows-backup-latest.log" *>> $log 2>$null
 if ($LASTEXITCODE -ne 0) { Write-Host "::warning::could not upload the backup log to $logRemote" }
 Write-Host "::warning::Windows snapshot did not complete; log saved to $logRemote/windows-backup-$stamp.log — session continues"
 exit 0
