@@ -20,6 +20,11 @@ name: windows-desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      snapshot_every_min:
+        description: 'Backup frequency in minutes'
+        required: false
+        default: '15'
   schedule:
     # 04:00 IST (22:30 UTC) daily safety-net.
     - cron: '30 22 * * *'
@@ -40,7 +45,9 @@ jobs:
         shell: pwsh
     env:
       SESSION_MINUTES: '330'
-      SNAPSHOT_EVERY_MIN: '30'
+      # Backups every 15 minutes by default. Override per run below.
+      SNAPSHOT_EVERY_MIN: ${{ github.event.inputs.snapshot_every_min || '15' }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       REMOTE: 'crypt1:winhome'        # encrypted remote for the Windows profile
       TRASH_REMOTE: 'crypt1:trash'
       TS_HOSTNAME: 'cloudpc-win'
