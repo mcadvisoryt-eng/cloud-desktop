@@ -33,6 +33,10 @@ on:
         description: 'Session length in minutes (set 2 for a quick diagnostic run)'
         required: false
         default: '330'
+      snapshot_every_min:
+        description: 'Backup frequency in minutes'
+        required: false
+        default: '15'
   schedule:
     # 04:00 IST (22:30 UTC) daily safety-net. If the PAT chain ever breaks,
     # this re-starts it.
@@ -52,7 +56,9 @@ jobs:
     timeout-minutes: 345   # comfortably under GitHub's 6h (360m) hard cap
     env:
       SESSION_MINUTES: ${{ github.event.inputs.session_minutes || '330' }}
-      SNAPSHOT_EVERY_MIN: '30'
+      # Backups every 15 minutes by default. Override per run below.
+      SNAPSHOT_EVERY_MIN: ${{ github.event.inputs.snapshot_every_min || '15' }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       DESKTOP_CHOICE: ${{ github.event.inputs.desktop || 'xfce' }}
       REMOTE: 'crypt1:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
       TRASH_REMOTE: 'crypt1:trash'   # 7-day recoverable deletions
