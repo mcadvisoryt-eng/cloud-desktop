@@ -36,9 +36,14 @@ log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
 # ntfy push notification (https://ntfy.sh). Set NTFY_TOPIC as a repo secret to
 # enable; without it this is a no-op and never blocks a backup.
 notify() {
-  [ -n "${NTFY_TOPIC:-}" ] || return 0
-  curl -fsS -m 15 -H "Title: ${1}" -H "Tags: ${2}" -H "Priority: ${3:-default}" \
-    -d "${4}" "https://ntfy.sh/${NTFY_TOPIC}" >/dev/null 2>&1 || true
+  if [ -z "${NTFY_TOPIC:-}" ]; then log "ntfy skipped: NTFY_TOPIC is not set"; return 0; fi
+  if curl -fsS -m 15 -H "Title: ${1}" -H "Tags: ${2}" -H "Priority: ${3:-default}" \
+       -d "${4}" "https://ntfy.sh/${NTFY_TOPIC}" >/dev/null 2>&1; then
+    log "ntfy sent: ${1}"
+  else
+    log "ntfy failed: ${1}"
+  fi
+  return 0
 }
 
 # nice/ionice keep the transfer out of the interactive path.
