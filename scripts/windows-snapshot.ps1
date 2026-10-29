@@ -26,12 +26,13 @@ $env:RCLONE_CONFIG = $conf
 
 function Notify([string]$title, [string]$tags, [string]$priority, [string]$msg) {
     # ntfy push (https://ntfy.sh). No-op unless NTFY_TOPIC is set.
-    if (-not $env:NTFY_TOPIC) { return }
+    if (-not $env:NTFY_TOPIC) { Write-Log "ntfy skipped: NTFY_TOPIC is not set"; return }
     try {
         $body = [Text.Encoding]::UTF8.GetBytes($msg)
         Invoke-RestMethod -Uri "https://ntfy.sh/$($env:NTFY_TOPIC)" -Method Post -Body $body `
             -Headers @{ Title = $title; Tags = $tags; Priority = $priority } -TimeoutSec 15 | Out-Null
-    } catch {}
+        Write-Log "ntfy sent: $title"
+    } catch { Write-Log "ntfy failed: $($_.Exception.Message)" }
 }
 
 function Write-Log([string]$m) {
@@ -90,23 +91,35 @@ if (Test-Path $chromeSrc) {
 }
 
 # --- profile hive: the piece that makes the folder a real profile ----------
-# NTUSER.DAT is locked while the user is logged in, so rclone cannot read it.
-# robocopy /B can, and without it the restore produces a folder Windows will
-# not adopt (it hangs in the User Profile Service).
-$hiveSrc = "C:\Users\$u\NTUSER.DAT"
-if (Test-Path $hiveSrc) {
-    Write-Log "Capturing the profile hive (robocopy /B)"
-    $hiveStage = 'C:\hive-stage'
-    Remove-Item $hiveStage -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path $hiveStage | Out-Null
-    & robocopy "C:\Users\$u" $hiveStage 'NTUSER.DAT' /B /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-    Write-Log "hive robocopy exit $LASTEXITCODE (below 8 means success)"
-    if ($LASTEXITCODE -lt 8) {
-        & $rclone copyto (Join-Path $hiveStage 'NTUSER.DAT') 'crypt1:winhive/NTUSER.DAT' *>> $log
-        Write-Log "hive upload exit $LASTEXITCODE"
+# NTUSER.DAT is a LIVE registry hive: Windows opens it with no shared read, so
+# even robocopy /B cannot copy it — which is why the hive never made it into the
+# backup. `reg save` is the supported way to snapshot a loaded hive, and it
+# works while the user is logged in.
+$hiveStage = 'C:\hive-stage'
+Remove-Item $hiveStage -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $hiveStage | Out-Null
+$hiveOut = Join-Path $hiveStage 'NTUSER.DAT'
+
+$sid = $null
+try { $sid = (Get-LocalUser -Name $u -ErrorAction Stop).SID.Value }
+catch { Write-Log "could not resolve the SID for $u" }
+
+if ($sid) {
+    & reg query "HKU\$sid" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "Saving the profile hive with reg save (HKU\$sid)"
+        & reg save "HKU\$sid" $hiveOut /y *>> $log
+        Write-Log "reg save exit $LASTEXITCODE"
+        if ((Test-Path $hiveOut) -and ((Get-Item $hiveOut).Length -gt 0)) {
+            Write-Log "hive file size $((Get-Item $hiveOut).Length) bytes"
+            & $rclone copyto $hiveOut 'crypt1:winhive/NTUSER.DAT' *>> $log
+            Write-Log "hive upload exit $LASTEXITCODE"
+        } else {
+            Write-Log "reg save produced no file - hive NOT captured"
+        }
+    } else {
+        Write-Log "hive for $u is not loaded (user not logged in) - nothing to capture"
     }
-} else {
-    Write-Log "no NTUSER.DAT yet (the profile has never been logged into)"
 }
 
 $attempt = 1
