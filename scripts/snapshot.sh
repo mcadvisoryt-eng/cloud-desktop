@@ -31,6 +31,10 @@ export RCLONE_CONFIG="${HOME}/.config/rclone/rclone.conf"
 # Prefer the static binary installed at /usr/local/bin, fall back to apt's.
 RCLONE_BIN="$(command -v rclone || echo rclone)"
 
+# Fixed default topic so notifications work out of the box. Override any time by
+# setting the NTFY_TOPIC secret; this value stays until you change it.
+NTFY_TOPIC="${NTFY_TOPIC:-cloudpc-2c50b2a3b2ba989d}"
+
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
 # ntfy push notification (https://ntfy.sh). Set NTFY_TOPIC as a repo secret to
@@ -87,6 +91,7 @@ while :; do
         --exclude '.ICEauthority' \
         --exclude 'gvfs/**' >>"$LOG" 2>&1; then
     log "Snapshot complete."
+    rc copyto "$LOG" "${LOG_REMOTE}/linux-backup-latest.log" >/dev/null 2>&1 || true
     changed=$(grep -oE 'Transferred:[[:space:]]+[0-9]+' "$LOG" | tail -1 | grep -oE '[0-9]+' || true)
     notify "Linux backup ok" "white_check_mark" "default" \
       "cloudpc: ${changed:-0} file(s) changed, synced to ${REMOTE}"
