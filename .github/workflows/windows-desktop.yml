@@ -21,10 +21,6 @@ name: windows-desktop
 on:
   workflow_dispatch:
     inputs:
-      snapshot_every_min:
-        description: 'Backup frequency in minutes'
-        required: false
-        default: '15'
   schedule:
     # 04:00 IST (22:30 UTC) daily safety-net.
     - cron: '30 22 * * *'
@@ -45,8 +41,8 @@ jobs:
         shell: pwsh
     env:
       SESSION_MINUTES: '330'
-      # Backups every 15 minutes by default. Override per run below.
-      SNAPSHOT_EVERY_MIN: ${{ github.event.inputs.snapshot_every_min || '15' }}
+      # Backups are ON DEMAND only (launcher button / maintenance backup-now).
+      CONTROL_REMOTE: 'crypt1:control'
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       REMOTE: 'crypt1:winhome'        # encrypted remote for the Windows profile
       TRASH_REMOTE: 'crypt1:trash'
@@ -461,12 +457,6 @@ jobs:
           & "$env:GITHUB_WORKSPACE/scripts/windows-session.ps1"
           exit 0
 
-      - name: Final backup
-        if: always()   # even on failure or cancellation
-        continue-on-error: true
-        run: |
-          & "$env:GITHUB_WORKSPACE/scripts/windows-snapshot.ps1"
-          exit 0
 
       - name: Trigger next session (fallback if the session did not pre-queue one)
         if: '!cancelled()'
