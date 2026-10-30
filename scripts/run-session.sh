@@ -16,7 +16,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_MINUTES="${SESSION_MINUTES:-330}"
-SNAPSHOT_EVERY_MIN="${SNAPSHOT_EVERY_MIN:-30}"
+CONTROL_REMOTE="${CONTROL_REMOTE:-crypt1:control}"
 HEALTH_EVERY_SEC="${HEALTH_EVERY_SEC:-15}"
 PREQUEUE_BEFORE_MIN="${PREQUEUE_BEFORE_MIN:-10}"
 
@@ -32,7 +32,7 @@ restart_xrdp() {
 start=$(date +%s)
 last_snap=$start
 prequeued=0
-echo "::notice::Session started $(date -u +%FT%TZ). Running ${SESSION_MINUTES}m, snapshot every ${SNAPSHOT_EVERY_MIN}m, health check every ${HEALTH_EVERY_SEC}s."
+echo "::notice::Session started $(date -u +%FT%TZ). Running ${SESSION_MINUTES}m, backups ON DEMAND only, health check every ${HEALTH_EVERY_SEC}s."
 
 while true; do
   now=$(date +%s)
@@ -57,11 +57,13 @@ while true; do
     fi
   fi
 
-  # Snapshot when due.
-  since_snap=$(( (now - last_snap) / 60 ))
-  if [ "$since_snap" -ge "$SNAPSHOT_EVERY_MIN" ]; then
-    echo "[$(date -u +%FT%TZ)] Periodic checkpoint (elapsed ${elapsed}m)..."
-    bash "$SCRIPT_DIR/snapshot.sh" || echo "::warning:: periodic snapshot failed, session continues"
+  # On-demand backup only: a marker in Drive triggers a snapshot from inside the
+  # LIVE session. No marker, no backup, so a logged-out state cannot overwrite a
+  # good one.
+  if rclone lsf "$CONTROL_REMOTE" --max-depth 1 2>/dev/null | grep -q 'backup-request-linux'; then
+    echo "[$(date -u +%FT%TZ)] Backup requested - snapshotting now."
+    bash "$SCRIPT_DIR/snapshot.sh" || echo "::warning:: requested snapshot failed, session continues"
+    rclone deletefile "$CONTROL_REMOTE/backup-request-linux" >/dev/null 2>&1 || true
     last_snap=$(date +%s)
   fi
 
