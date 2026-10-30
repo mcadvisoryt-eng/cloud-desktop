@@ -21,7 +21,9 @@ $start     = Get-Date
 $deadline  = $start.AddMinutes($SessionMinutes)
 $lastSnap  = $start
 $prequeued = $false
-Write-Host "::notice::Windows session started. Running ${SessionMinutes}m, snapshot every ${SnapshotEveryMin}m, health check every ${HealthEverySec}s."
+$rclone    = if (Test-Path 'C:\rclone\rclone.exe') { 'C:\rclone\rclone.exe' } else { 'rclone' }
+$ControlRemote = if ($env:CONTROL_REMOTE) { $env:CONTROL_REMOTE } else { 'crypt1:control' }
+Write-Host "::notice::Windows session started. Running ${SessionMinutes}m, backups ON DEMAND only, health check every ${HealthEverySec}s."
 
 function Test-RdpUp {
     [bool](Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue)
@@ -44,12 +46,19 @@ while ((Get-Date) -lt $deadline) {
         }
     }
 
-    # Snapshot when due.
-    if (((Get-Date) - $lastSnap).TotalMinutes -ge $SnapshotEveryMin) {
-        Write-Host "Periodic checkpoint..."
-        & "$PSScriptRoot\windows-snapshot.ps1"
-        $lastSnap = Get-Date
-    }
+    # On-demand backup only. The launcher / maintenance workflow drops a marker
+    # in Drive; we act on it here, inside the LIVE session, because that is the
+    # only place the real profile exists. No marker means no backup — so a
+    # logged-out state can never overwrite a good one.
+    try {
+        $markers = & $rclone lsf $ControlRemote --max-depth 1 2>$null
+        if ($markers -match 'backup-request-windows') {
+            Write-Host "Backup requested - snapshotting now."
+            & "$PSScriptRoot\windows-snapshot.ps1"
+            & $rclone deletefile "$ControlRemote/backup-request-windows" *> $null
+            $lastSnap = Get-Date
+        }
+    } catch { }
 
     Start-Sleep -Seconds $HealthEverySec
 }
