@@ -238,9 +238,9 @@ async function stop(key){
 async function backup(key){
   const target = key === 'win' ? 'windows' : 'linux';
   try {
-    await gh(`/repos/${store.repo}/actions/workflows/maintenance.yml/dispatches`, {
+    await gh(`/repos/${store.repo}/actions/workflows/backup.yml/dispatches`, {
       method: 'POST',
-      body: JSON.stringify({ ref: 'main', inputs: { action: 'backup-now', target } }),
+      body: JSON.stringify({ ref: 'main', inputs: { target } }),
     });
     toast('Backup requested - the live session picks it up within ~15s');
   } catch (e){ toast('Could not request backup: ' + e.message); }
