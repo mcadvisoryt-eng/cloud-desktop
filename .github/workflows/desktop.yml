@@ -33,10 +33,6 @@ on:
         description: 'Session length in minutes (set 2 for a quick diagnostic run)'
         required: false
         default: '330'
-      snapshot_every_min:
-        description: 'Backup frequency in minutes'
-        required: false
-        default: '15'
   schedule:
     # 04:00 IST (22:30 UTC) daily safety-net. If the PAT chain ever breaks,
     # this re-starts it.
@@ -56,8 +52,8 @@ jobs:
     timeout-minutes: 345   # comfortably under GitHub's 6h (360m) hard cap
     env:
       SESSION_MINUTES: ${{ github.event.inputs.session_minutes || '330' }}
-      # Backups every 15 minutes by default. Override per run below.
-      SNAPSHOT_EVERY_MIN: ${{ github.event.inputs.snapshot_every_min || '15' }}
+      # Backups are ON DEMAND only (launcher button / maintenance backup-now).
+      CONTROL_REMOTE: 'crypt1:control'
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       DESKTOP_CHOICE: ${{ github.event.inputs.desktop || 'xfce' }}
       REMOTE: 'crypt1:home'          # rclone crypt remote (defined in RCLONE_CONFIG)
@@ -532,9 +528,6 @@ jobs:
           # and a stall there meant no snapshots at all.
           wait "$SESSION_PID" || true
 
-      - name: Final backup
-        if: always()   # even on failure or cancellation — save what we can
-        run: bash "$GITHUB_WORKSPACE/scripts/snapshot.sh" || true
 
       - name: Trigger next session (fallback if the session did not pre-queue one)
         if: '!cancelled()'
