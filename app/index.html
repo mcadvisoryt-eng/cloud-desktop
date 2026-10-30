@@ -45,6 +45,7 @@
   button:active{transform:scale(.98)}
   button.go{background:linear-gradient(135deg,#6d4bff,#9d7bff);border-color:transparent}
   button.stop{background:#3a1d2c;border-color:#5a2b42;color:#ffb3c6}
+  button.bkp{background:#1d3348;border-color:#2b4a63;color:#a8d8ff}
   button:disabled{opacity:.45;cursor:default}
   .ghost{background:transparent;color:var(--dim)}
   details{margin-top:6px}
@@ -85,6 +86,7 @@
     <div class="btns">
       <button class="go" id="go-linux">Start</button>
       <button class="stop" id="stop-linux" disabled>Stop</button>
+      <button class="bkp" id="bkp-linux" disabled>Backup</button>
     </div>
   </div>
 
@@ -103,6 +105,7 @@
     <div class="btns">
       <button class="go" id="go-win">Start</button>
       <button class="stop" id="stop-win" disabled>Stop</button>
+      <button class="bkp" id="bkp-win" disabled>Backup</button>
     </div>
   </div>
 
@@ -119,7 +122,7 @@
         but start and stop these workflows.
       </div>
     </details>
-    <div class="note" id="hint">Set the repository and token above to enable the buttons.</div>
+    <div class="note" id="hint">Backups are manual: press Backup on a card, the live session snapshots. Restores still happen automatically at every start.</div>
   </div>
 </div>
 
@@ -171,6 +174,7 @@ function paint(key, runs){
   if (!live){
     state.textContent = runs[0] ? 'offline · last ' + runs[0].conclusion : 'offline';
     go.disabled = !ready(); stop.disabled = true;
+    $('bkp-' + key).disabled = true;
     return;
   }
   if (live.status === 'in_progress'){
@@ -178,10 +182,12 @@ function paint(key, runs){
     dot.classList.add('on');
     state.textContent = 'live · ' + mins + 'm';
     stop.disabled = !ready();
+    $('bkp-' + key).disabled = !ready();
   } else {
     dot.classList.add('wait');
     state.textContent = 'starting…';
     stop.disabled = !ready();
+    $('bkp-' + key).disabled = !ready();
   }
   go.disabled = true;
 }
@@ -229,6 +235,17 @@ async function stop(key){
   } catch (e){ toast('Could not stop: ' + e.message); }
 }
 
+async function backup(key){
+  const target = key === 'win' ? 'windows' : 'linux';
+  try {
+    await gh(`/repos/${store.repo}/actions/workflows/maintenance.yml/dispatches`, {
+      method: 'POST',
+      body: JSON.stringify({ ref: 'main', inputs: { action: 'backup-now', target } }),
+    });
+    toast('Backup requested - the live session picks it up within ~15s');
+  } catch (e){ toast('Could not request backup: ' + e.message); }
+}
+
 document.querySelectorAll('[data-copy]').forEach(b => {
   b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied ' + b.dataset.copy); }
@@ -238,14 +255,16 @@ document.querySelectorAll('[data-copy]').forEach(b => {
 
 $('repo').value = store.repo;
 $('token').value = store.token;
-$('repo').addEventListener('change', e => { store.repo = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.'; refresh(); });
-$('token').addEventListener('change', e => { store.token = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.'; refresh(); });
+$('repo').addEventListener('change', e => { store.repo = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Backups are manual: press Backup on a card, the live session snapshots. Restores still happen automatically at every start.'; refresh(); });
+$('token').addEventListener('change', e => { store.token = e.target.value; $('hint').textContent = ready() ? 'Ready.' : 'Backups are manual: press Backup on a card, the live session snapshots. Restores still happen automatically at every start.'; refresh(); });
 $('go-linux').addEventListener('click', () => start('linux'));
 $('go-win').addEventListener('click', () => start('win'));
 $('stop-linux').addEventListener('click', () => stop('linux'));
 $('stop-win').addEventListener('click', () => stop('win'));
+$('bkp-linux').addEventListener('click', () => backup('linux'));
+$('bkp-win').addEventListener('click', () => backup('win'));
 
-$('hint').textContent = ready() ? 'Ready.' : 'Set the repository and token above to enable the buttons.';
+$('hint').textContent = ready() ? 'Ready.' : 'Backups are manual: press Backup on a card, the live session snapshots. Restores still happen automatically at every start.';
 refresh();
 setInterval(refresh, 20000);
 </script>
